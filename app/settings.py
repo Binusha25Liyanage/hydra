@@ -58,6 +58,7 @@ DEFAULTS: dict = {
     "notifications.sound": False,
     # UI
     "ui.theme": "dark",
+    "ui.titlebar": "black",             # black (red title) | red (white title)
     "ui.sidebar_collapsed": False,
     # Data meter
     "datameter.monthly_cap_mb": 2048,

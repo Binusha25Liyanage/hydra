@@ -295,7 +295,7 @@ class Api:
             "reports": {"title_prefix": settings.get("reports.title_prefix")},
             "notifications": {"windows_toasts": settings.get("notifications.windows_toasts"),
                               "sound": settings.get("notifications.sound")},
-            "general": {"theme": settings.get("ui.theme")},
+            "general": {"theme": settings.get("ui.theme"), "titlebar": settings.get("ui.titlebar")},
             "datameter": {"monthly_cap_mb": settings.get("datameter.monthly_cap_mb")},
             "user": auth.current(),
         }
@@ -307,7 +307,7 @@ class Api:
             "startup": {"check_sfa_login": bool, "check_whatsapp": bool, "sfa_timeout_s": int},
             "reports": {"title_prefix": str},
             "notifications": {"windows_toasts": bool, "sound": bool},
-            "general": {"theme": str},
+            "general": {"theme": str, "titlebar": str},
             "datameter": {"monthly_cap_mb": int},
         }
         prefix = {"general": "ui", "startup": "startup", "reports": "reports",
@@ -318,8 +318,13 @@ class Api:
         for k, typ in allowed[section].items():
             if k in data:
                 vals[f"{prefix[section]}.{k}"] = typ(data[k]).strip() if typ is str else typ(data[k])
+        if "ui.titlebar" in vals and vals["ui.titlebar"] not in ("black", "red"):
+            return {"ok": False, "error": "Title bar must be black or red."}
         settings.set_many(vals)
         db.audit(user["username"], f"settings.{section}", ", ".join(vals))
+        if "ui.titlebar" in vals:
+            from . import winicon
+            winicon.style_titlebar(vals["ui.titlebar"])     # apply immediately
         return {}
 
     # =========================================================== status / dashboard

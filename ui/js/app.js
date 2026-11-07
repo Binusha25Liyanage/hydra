@@ -5,7 +5,7 @@
     dashboard: "Dashboard", run: "Run Center", reports: "Reports History", territories: "Territories",
     targets: "Hierarchy & Targets", calendar: "Competition Calendar", aliases: "Aliases & Labels",
     reconciliation: "Reconciliation", schedule: "Schedule", whatsapp: "WhatsApp", activity: "Activity Monitor",
-    notifications: "Notifications", logs: "Logs", settings: "Settings", about: "About",
+    notifications: "Notifications", logs: "Logs", settings: "Settings", about: "About", colleagues: "Colleagues",
   };
   window.App = { user: null, status: null, go, refreshStatus };
 
@@ -79,6 +79,7 @@
     $("#uname").textContent = st.user.display_name;
     $("#urole").textContent = `${st.user.username} · ${st.user.role}`;
     if (st.user.role === "user") $("#m-wizard").classList.add("hidden");
+    $$("[data-role]").forEach((el) => el.classList.toggle("hidden", el.dataset.role !== st.user.role));
     await refreshStatus();
     setInterval(refreshStatus, 30000);
     go((location.hash || "#dashboard").slice(1));

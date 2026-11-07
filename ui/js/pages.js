@@ -112,6 +112,10 @@
     const R = {
       general: () => `<div class="card"><div class="card-h">${icon("settings")}<h3>General</h3></div><div class="card-b stack">
           <div class="field"><label>Theme</label><div class="seg" id="theme"><button data-v="dark" class="on">Black &amp; Cherry</button><button data-v="full_dark" disabled title="Coming later">Full dark</button></div></div>
+          <div class="field"><label>Window title bar</label><div class="seg" id="titlebar">
+            <button data-v="black" class="${S.general.titlebar === "black" ? "on" : ""}">Black · red title</button>
+            <button data-v="red" class="${S.general.titlebar === "red" ? "on" : ""}">Red · white title</button></div>
+            <div class="hint">Windows 11 colours the title bar; minimise, maximise and close stay as normal Windows buttons.</div></div>
           <div class="faint">Start with Windows and minimise-to-tray arrive with the background worker in Phase 10.</div></div></div>`,
       sfa: () => { const f = S.sfa, t = f.last_test || {};
         return `<div class="card"><div class="card-h">${icon("server")}<h3>SFA Connection</h3><span class="spacer"></span><a class="btn btn-secondary btn-sm" href="wizard.html?step=sfa">${icon("settings")}Edit &amp; test</a></div><div class="card-b">
@@ -161,6 +165,14 @@
         if (r.ok) { Object.assign(S[k], data); toast("success", "Settings saved"); } else toast("error", "Not saved", r.error);
       };
       if ($("#openout")) $("#openout").onclick = () => call("open_folder", "output");
+      $$("#titlebar button").forEach((b) => b.onclick = async () => {
+        if (!isAdmin) return;
+        const r = await call("settings_save", "general", { titlebar: b.dataset.v });
+        if (!r.ok) return toast("error", "Not saved", r.error);
+        S.general.titlebar = b.dataset.v;
+        $$("#titlebar button").forEach((x) => x.classList.toggle("on", x === b));
+        toast("success", "Title bar updated");
+      });
       if ($("#chpw")) $("#chpw").onclick = changePassword;
       if (k === "users") await usersSection();
     }
@@ -261,6 +273,30 @@
       <ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`;
   }
 
-  window.Pages = { dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword };
+  // =============================================================== Colleagues (Super Admin)
+  function colleagues(main) {
+    const sample = [
+      ["Sales Admin Coordinator", "Management sales reports", "v0.1.2", "online", "5 / 5 runs OK"],
+      ["Sales Admin Coordinator 2", "Different sales processes", "v0.1.2", "online", "3 / 4 runs · 1 failed"],
+      ["IT Assistant", "IT processes", "v0.1.1", "update", "2 / 2 runs OK"],
+      ["Human Resource Assistant", "HR processes", "v0.1.2", "offline", "Last seen yesterday"],
+      ["Finance Executive", "Finance reports", "v0.1.2", "online", "1 / 1 runs OK"],
+      ["Finance & Administrative Manager", "Finance & admin reports", "v0.1.2", "online", "Waiting for 14:00 run"],
+    ];
+    const chip = { online: '<span class="chip ok">Online</span>', offline: '<span class="chip">Offline</span>', update: '<span class="chip warn">Update available</span>' };
+    main.innerHTML = `${head("Team · Super Admin", "Colleagues", "See and manage every colleague's Hydra from here — their dashboard, runs, reports, schedule and logs. Only the Super Admin sees this screen.")}
+      <div class="alert info" style="margin-bottom:16px">${icon("info")}<div><b>Preview — switches on with the Hydra Cloud phase</b>Colleagues' Hydra apps connect only through the Super Admin's Google Sheet and Drive, so this view is refreshed on every sync (a few minutes), not live screen sharing. The rows below are sample roles.</div></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Colleague role</th><th>Services</th><th>Hydra version</th><th>Status</th><th>Today</th><th></th></tr></thead><tbody>
+        ${sample.map(([r, s, v, st, t]) => `<tr><td><b>${esc(r)}</b></td><td class="muted">${esc(s)}</td><td class="mono">${v}</td><td>${chip[st]}</td><td class="muted">${esc(t)}</td>
+          <td><button class="btn btn-dark btn-sm" disabled>${icon("eye")}Open their Hydra</button></td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="cards c3" style="margin-top:16px">
+        <div class="card"><div class="card-h">${icon("eye")}<h3>Open their Hydra</h3></div><div class="card-b muted">A read-only copy of that person's Hydra: their dashboard, startup checks, runs, generated reports (from their Drive folder), schedule and logs.</div></div>
+        <div class="card"><div class="card-h">${icon("settings")}<h3>Manage remotely</h3></div><div class="card-b muted">Assign role and services, change their schedule, reset their Hydra password, push a new version. Changes reach them on their next sync.</div></div>
+        <div class="card"><div class="card-h">${icon("zap")}<h3>Send commands</h3></div><div class="card-b muted">“Run now”, “Sync now”, “Upload logs”, “Re-check SFA” — queued in the Sheet and picked up by their Hydra within minutes.</div></div>
+      </div>`;
+  }
+
+  window.Pages = { dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues };
   Object.keys(PLAN).forEach((k) => window.Pages[k] = placeholder);
 })();

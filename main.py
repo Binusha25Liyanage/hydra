@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 
-from app import db, logging_setup, paths, version, winicon
+from app import db, logging_setup, paths, settings, version, winicon
 from app.api import Api
 
 log = logging.getLogger("hydra.main")
@@ -52,7 +52,7 @@ def main() -> int:
 
     api = Api()
     window = webview.create_window(
-        title="Hydra — Work Automation Suite",
+        title="HYDRA",
         url=str(paths.ui_dir() / "splash.html"),
         js_api=api,
         width=1440, height=900, min_size=(1280, 720),
@@ -60,7 +60,8 @@ def main() -> int:
         text_select=False,
     )
     api._attach(window)
-    window.events.shown += lambda: winicon.apply_icon_when_ready(ico)
+    window.events.shown += lambda: winicon.apply_when_ready(ico, settings.get("ui.titlebar"))
+    window.events.loaded += lambda: winicon.apply_when_ready(ico, settings.get("ui.titlebar"), attempts=3)
     webview.start(debug=os.environ.get("HYDRA_DEBUG") == "1", http_server=True,
                   icon=str(paths.ui_dir() / "assets" / "img" / "hydra_icon.png"))
     log.info("Hydra closed")
