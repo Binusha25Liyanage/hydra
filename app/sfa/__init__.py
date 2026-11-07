@@ -1,0 +1,1 @@
+"""SalesPro SFA automation (Playwright)."""

@@ -1,0 +1,9 @@
+# Hydra — Python dependencies
+# Use Python 3.12 or 3.13 (64-bit). Python 3.14 is too new for some of these packages on Windows.
+pywebview>=5.3.2,<6
+playwright>=1.49.1
+pandas>=2.2.3,<3
+openpyxl>=3.1.5
+keyring>=25.5.0
+pyperclip>=1.9.0
+psutil>=6.1.0

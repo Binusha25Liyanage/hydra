@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hydra — Sign in</title>
+<link rel="stylesheet" href="css/hydra.css">
+<style>
+  body { display: grid; grid-template-columns: 55fr 45fr; overflow: hidden; }
+  .left { position: relative; display: flex; flex-direction: column; padding: 56px 60px 28px; background: linear-gradient(180deg, #121417 0%, #0E0F12 55%, #3A0A13 100%); overflow: hidden; }
+  .left::before { content: ""; position: absolute; inset: 0; background: var(--brushed); }
+  .left::after { content: ""; position: absolute; left: -10%; right: -10%; bottom: -30%; height: 60%; background: radial-gradient(ellipse at 30% 100%, rgba(179,23,47,.45), transparent 65%); }
+  .left > * { position: relative; z-index: 1; }
+  .left .wordmark { font-size: 64px; letter-spacing: .1em; margin: 10px 0 4px; }
+  .left .sub { letter-spacing: .36em; font-size: 13px; color: var(--mercury-300); }
+  .left .emblem { margin: auto; width: 270px; position: relative; }
+  .left .emblem::before { content: ""; position: absolute; inset: -40px; background: radial-gradient(circle, rgba(203,210,217,.10), transparent 65%); }
+  .left .emblem img { width: 100%; position: relative; }
+  .quote { text-align: center; font-family: var(--serif); font-style: italic; font-size: 26px; color: var(--mercury-200); margin: 6px 0 24px; }
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 18px 0; border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); }
+  .features div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text); }
+  .features svg { width: 34px; height: 34px; padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.12); color: var(--cherry-300); flex: none; }
+  .lstatus { display: flex; gap: 16px; align-items: center; padding-top: 14px; font-size: 12px; color: var(--text-2); }
+
+  .right { background: var(--offwhite); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+  .box { width: 480px; background: var(--offwhite-card); border: 1px solid #E3E0D8; border-radius: 12px; padding: 40px 40px 26px; box-shadow: 0 20px 50px -25px rgba(0,0,0,.35); }
+  .box h2 { font-family: var(--serif); font-size: 30px; font-weight: 600; text-align: center; letter-spacing: .03em; }
+  .box .lead { text-align: center; color: #6B6467; margin: 6px 0 22px; }
+  .box .label { color: #3B3437; }
+  .box .input { background: #fff; border-color: #CFC9BE; color: var(--ink); height: 44px; }
+  .box .input:focus { border-color: var(--cherry-500); box-shadow: 0 0 0 3px rgba(179,23,47,.15); }
+  .box .input-wrap > svg { color: #8A8285; }
+  .box .eye { color: #8A8285 !important; }
+  .box .check { color: #3B3437; }
+  .box .hint { color: #7A7275; font-size: 12px; }
+  .box .alert.err { background: #FFF1EA; color: #9A3412; border-color: #F7B08F; }
+  .box .alert.ok { background: #ECF8F2; color: #13603F; border-color: #9CD9BC; }
+  .box .btn-primary { width: 100%; height: 48px; font-size: 15px; }
+  .divider { height: 1px; background: #E3E0D8; margin: 22px 0 14px; }
+  .foot { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #7A7275; }
+  .foot .chip { text-transform: none; letter-spacing: 0; }
+</style>
+</head>
+<body>
+  <section class="left">
+    <div class="overline"><span class="dot"></span>&nbsp; Lakmee Exports Lanka · Management Reporting</div>
+    <div class="wordmark">HYDRA</div>
+    <div class="sub">MANAGEMENT REPORT AUTOMATION</div>
+    <div class="emblem"><img src="assets/img/hydra_logo_silver.png" alt=""></div>
+    <div class="quote">“Watching every territory. Reporting every head.”</div>
+    <div class="features">
+      <div><span data-icon="refresh"></span>Automatic SFA downloads</div>
+      <div><span data-icon="file"></span>Excel, PDF &amp; PNG reports</div>
+      <div><span data-icon="message"></span>WhatsApp delivery after approval</div>
+    </div>
+    <div class="lstatus" id="lstatus"></div>
+  </section>
+
+  <section class="right">
+    <div class="box">
+      <!-- Sign in -->
+      <form id="signin" class="stack" autocomplete="off">
+        <h2>Sign in to Hydra</h2>
+        <div class="lead">Use your Hydra account (not your SFA login).</div>
+        <div id="err" class="alert err hidden"></div>
+        <div class="field"><label class="label" for="u">Username</label>
+          <div class="input-wrap"><span data-icon="user"></span><input class="input" id="u" autofocus></div></div>
+        <div class="field"><label class="label" for="p">Password</label>
+          <div class="input-wrap"><span data-icon="lock"></span><input class="input" id="p" type="password"><button type="button" class="eye"></button></div></div>
+        <label class="check"><input type="checkbox" id="remember" checked> Keep me signed in on this computer (30 days)</label>
+        <button class="btn btn-primary" id="go" type="submit">Sign in <span data-icon="arrow"></span></button>
+      </form>
+
+      <!-- First run: create the superadmin -->
+      <form id="create" class="stack hidden" autocomplete="off">
+        <h2>Create the administrator</h2>
+        <div class="lead">This is the first time Hydra is running on this computer. Create the main (superadmin) account — you can add more users later in Settings → Users &amp; Roles.</div>
+        <div id="cerr" class="alert err hidden"></div>
+        <div class="grid-2">
+          <div class="field"><label class="label" for="cu">Username</label><input class="input" id="cu" placeholder="e.g. binusha"></div>
+          <div class="field"><label class="label" for="cn">Display name</label><input class="input" id="cn" placeholder="e.g. Binusha Liyanage"></div>
+        </div>
+        <div class="field"><label class="label" for="cp">Password</label>
+          <div class="input-wrap"><span data-icon="lock"></span><input class="input" id="cp" type="password"><button type="button" class="eye"></button></div>
+          <div class="hint">At least 8 characters, with letters and numbers.</div></div>
+        <div class="field"><label class="label" for="cp2">Confirm password</label>
+          <div class="input-wrap"><span data-icon="lock"></span><input class="input" id="cp2" type="password"><button type="button" class="eye"></button></div></div>
+        <button class="btn btn-primary" id="cgo" type="submit">Create account &amp; start setup <span data-icon="arrow"></span></button>
+      </form>
+
+      <div class="divider"></div>
+      <div class="foot"><span id="ver"></span><span class="chip light" id="role" style="display:none"></span></div>
+    </div>
+  </section>
+
+<script src="js/bridge.js"></script>
+<script>
+(function () {
+  const { call, $, esc, icon } = Hydra;
+  const params = new URLSearchParams(location.search);
+
+  function err(el, msg) { el.innerHTML = `${icon("warn")}<div>${esc(msg)}</div>`; el.classList.remove("hidden"); }
+
+  async function init() {
+    const info = await call("app_info");
+    $("#ver").textContent = `Hydra v${info.version} · ${info.phase}`;
+    const st = await call("auth_state");
+    if (!st.has_users || params.get("mode") === "create") {
+      $("#signin").classList.add("hidden"); $("#create").classList.remove("hidden"); $("#cu").focus();
+    }
+    const sb = await call("status_bar");
+    if (sb.ok && st.has_users) {
+      const sfa = sb.sfa.logged_in ? `<span class="dot ok"></span> SFA signed in${sb.sfa.display_name ? " as " + esc(sb.sfa.display_name) : ""}`
+                                   : `<span class="dot warn"></span> SFA not signed in`;
+      const wa = sb.whatsapp.linked ? `<span class="dot ok"></span> WhatsApp linked` : `<span class="dot off"></span> WhatsApp not linked`;
+      $("#lstatus").innerHTML = `<span>${sfa}</span><span>${wa}</span>`;
+    }
+  }
+
+  $("#signin").onsubmit = async (e) => {
+    e.preventDefault();
+    $("#err").classList.add("hidden");
+    Hydra.busy($("#go"), true, "Signing in…");
+    const r = await call("auth_login", $("#u").value, $("#p").value, $("#remember").checked);
+    Hydra.busy($("#go"), false);
+    if (!r.ok) { err($("#err"), r.error); $("#p").select(); return; }
+    $("#role").textContent = `${r.user.display_name} · ${r.user.role}`; $("#role").style.display = "";
+    location.href = r.next === "wizard" ? "wizard.html" : "app.html";
+  };
+
+  $("#create").onsubmit = async (e) => {
+    e.preventDefault();
+    $("#cerr").classList.add("hidden");
+    Hydra.busy($("#cgo"), true, "Creating…");
+    const r = await call("auth_create_first_admin", $("#cu").value, $("#cn").value, $("#cp").value, $("#cp2").value);
+    Hydra.busy($("#cgo"), false);
+    if (!r.ok) { err($("#cerr"), r.error); return; }
+    location.href = "wizard.html";
+  };
+
+  Hydra.ready.then(init);
+})();
+</script>
+</body>
+</html>

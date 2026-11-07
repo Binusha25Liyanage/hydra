@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.spec
+# runtime data never goes to git (database, logs, browser profiles, credentials)
+data/
+logs/
+profiles/
+*.db
+*.db-wal
+*.db-shm
