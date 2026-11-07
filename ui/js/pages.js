@@ -222,7 +222,7 @@
     main.innerHTML = `<div style="max-width:820px;margin:10px auto">
       <div class="card" style="overflow:hidden"><div style="background:linear-gradient(180deg,#16171A,#0B0C0E);padding:36px;text-align:center;border-bottom:1px solid var(--black-700)">
         <img src="assets/img/hydra_logo_silver.png" style="width:190px"><div class="wordmark" style="font-size:52px;margin-top:14px;padding-left:.32em">HYDRA</div>
-        <div class="overline" style="letter-spacing:.42em">Management Report Automation</div></div>
+        <div class="overline" style="letter-spacing:.42em">Work Automation Suite</div></div>
         <div class="card-b"><div class="grid-2">
           <table class="table"><tbody>
             <tr><td class="faint">Version</td><td><b>v${esc(a.version)}</b> · ${esc(a.phase)}</td></tr>
@@ -236,7 +236,7 @@
         </div>
         <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--black-700)" class="row wrap">
           <div><b>Developed by Binusha Liyanage</b><div class="faint">IT Department, Lakmee Exports Lanka</div></div><span class="spacer"></span>
-          <span class="faint serif" style="font-style:italic;font-size:16px">Hydra — the many-headed serpent: one body, many heads. One engine, many reports.</span></div>
+          <span class="faint serif" style="font-style:italic;font-size:16px">Hydra — the many-headed serpent: one body, many heads. One engine, every role’s work.</span></div>
         </div></div></div>`;
     $("#odata").onclick = () => call("open_folder", "data");
   }

@@ -69,9 +69,10 @@
   function welcome() {
     return `${head("Step 01 · Welcome", "Welcome to Hydra", "")}
       <div class="card"><div class="card-b welcome-grid"><img src="assets/img/hydra_logo_silver.png" alt="">
-        <div class="stack"><p class="muted" style="margin:0;font-size:14px">Hydra signs in to SalesPro SFA with your account, downloads the sales Excel reports,
-          converts every number, builds the management reports (Day Report, Target vs Achievement, Sales Comparison, Daily Winners, Pending Orders and the monthly
-          Finalized report) and sends them to WhatsApp after you approve them.</p>
+        <div class="stack"><p class="muted" style="margin:0;font-size:14px">Hydra automates your daily work. It signs in to SalesPro SFA with your own account,
+          runs the reports and processes your role needs — downloads, data clean-up, Excel / PDF / PNG reports, updates in SFA — on schedule, and delivers the
+          results to WhatsApp after you approve them. The first role built is the management sales reports (Day Report, Target vs Achievement, Sales Comparison,
+          Daily Winners, Pending Orders and the monthly Finalized report).</p>
           <div class="alert info">${icon("info")}<div><b>This is Phase 1 — the foundation.</b>Today you set up the SFA connection, the page URLs and the save folder.
           The other steps are shown so you can see the whole journey; they switch on as each phase is delivered and can be completed later from Settings.</div></div>
           <div class="row wrap"><span class="chip ok">${icon("check")}SFA sign-in</span><span class="chip ok">${icon("check")}Page checks</span><span class="chip ok">${icon("check")}Save folder</span>

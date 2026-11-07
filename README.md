@@ -1,6 +1,6 @@
-# Hydra — Management Report Automation
+# Hydra — Work Automation Suite
 
-Hydra is a desktop app for Lakmee Exports Lanka. It signs in to SalesPro SFA, downloads the sales Excel reports, builds the management reports and sends them to WhatsApp once someone approves them.
+Hydra is a desktop app for Lakmee Exports Lanka that automates each person's work. It signs in to SalesPro SFA with that person's own account, runs the reports and processes their role needs, and delivers the results (Excel, PDF, PNG, WhatsApp) once someone approves them. The first role built is the management sales reports: Day Report, Target vs Achievement, Sales Comparison, Daily Winners, Pending Orders and Finalized Target vs Achievement.
 
 **This build is Phase 1 (Foundation):** the splash screen, users and roles, the setup wizard (SFA connection, page URLs, save location), the app shell, and the Dashboard, Notifications, Logs, Settings and About screens.
 

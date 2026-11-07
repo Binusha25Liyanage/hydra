@@ -1,1 +1,1 @@
-"""Hydra — Management Report Automation for Lakmee Exports Lanka."""
+"""Hydra — Work Automation Suite for Lakmee Exports Lanka."""

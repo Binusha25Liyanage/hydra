@@ -1,4 +1,4 @@
-"""Hydra — Management Report Automation.
+"""Hydra — Work Automation Suite for Lakmee Exports Lanka.
 
 Run from source:   python main.py
 Debug (DevTools):  set HYDRA_DEBUG=1 && python main.py
@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 
-from app import db, logging_setup, paths, version
+from app import db, logging_setup, paths, version, winicon
 from app.api import Api
 
 log = logging.getLogger("hydra.main")
@@ -47,9 +47,12 @@ def main() -> int:
 
     import webview
 
+    ico = paths.ui_dir() / "assets" / "img" / "hydra.ico"
+    winicon.set_app_id(version.APP_ID)          # own taskbar group, not python.exe
+
     api = Api()
     window = webview.create_window(
-        title="Hydra — Management Report Automation",
+        title="Hydra — Work Automation Suite",
         url=str(paths.ui_dir() / "splash.html"),
         js_api=api,
         width=1440, height=900, min_size=(1280, 720),
@@ -57,6 +60,7 @@ def main() -> int:
         text_select=False,
     )
     api._attach(window)
+    window.events.shown += lambda: winicon.apply_icon_when_ready(ico)
     webview.start(debug=os.environ.get("HYDRA_DEBUG") == "1", http_server=True,
                   icon=str(paths.ui_dir() / "assets" / "img" / "hydra_icon.png"))
     log.info("Hydra closed")
