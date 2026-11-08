@@ -1,12 +1,11 @@
-"""The five daily management reports (Day Report, Target vs Achievement, Sales Comparison,
-Daily Winners, Pending Order Value). Each returns a Table."""
+"""Sales reports service: the five daily management reports. Each builder takes a Context and returns a Table."""
 from __future__ import annotations
 
 from datetime import date
 
-from .. import db, settings
-from .context import DEFAULT_LIMITS, EXCLUDED_SMMT, LEVEL_NAMES, Context, ReportError, key, ordinal
-from .table import Column, Row, Table, diff, hierarchy_rows, pct
+from ... import db, settings
+from ...reports.table import Column, Row, Table, diff, hierarchy_rows, pct
+from .context import DEFAULT_LIMITS, EXCLUDED_SMMT, Context, ReportError, key, ordinal
 
 REPORT_TYPES = {
     "day_report": "Day Report",

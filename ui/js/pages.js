@@ -536,15 +536,17 @@
   }
 
   // =============================================================== Run Center
-  async function runCenter(main) {
+  async function runCenter(main, page, opts) {
     const types = (await call("reports_types")).types;
-    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    main.innerHTML = `${head("Generate", "Run Center", "Pick a report date, check the data is there, and generate. Until Phase 2 downloads SFA files automatically, import them on the SFA Data screen first.")}
+    const yday = new Date(Date.now() - 86400000 + new Date().getTimezoneOffset() * -60000).toISOString().slice(0, 10);
+    main.innerHTML = `${head("Generate", "Run Center", "Pick a report date, check the data is there, and generate. Each report is saved as Excel, PDF and WhatsApp images, then opens in Preview &amp; Send.")}
       <div class="cards c2" style="grid-template-columns:2fr 3fr;align-items:start">
         <div class="card"><div class="card-h">${icon("run")}<h3>New run</h3></div><div class="card-b stack">
           <div class="field"><label>Report date</label><input class="input" type="date" id="rdate" value="${yday}"></div>
-          <div class="field"><label>Reports</label>${types.map((t) => `<label class="check" style="margin:3px 0"><input type="checkbox" class="rtype" value="${t.id}" checked> ${esc(t.name)}</label>`).join("")}</div>
-          <button class="btn btn-primary btn-lg" id="rgo">${icon("zap")}Generate reports</button></div></div>
+          <div class="field"><label>Reports</label>${types.map((t) => `<label class="check" style="margin:3px 0"><input type="checkbox" class="rtype" value="${t.id}" ${t.default_on === false ? "" : "checked"}> ${esc(t.name)}</label>`).join("")}</div>
+          <div class="field"><label>Also create</label><div class="row wrap"><label class="check"><input type="checkbox" id="fpdf" checked> PDF</label><label class="check"><input type="checkbox" id="fpng" checked> WhatsApp images (PNG)</label></div></div>
+          <div class="row"><button class="btn btn-primary btn-lg" id="rgo">${icon("zap")}Generate reports</button><button class="btn btn-dark btn-stop hidden" id="rstop">${icon("stop")}Stop</button></div>
+          <div class="faint hidden" id="rprog"><span class="spinner"></span><span id="rprogt">Working…</span></div></div></div>
         <div class="card"><div class="card-h">${icon("check")}<h3>Data check</h3><span class="spacer"></span><button class="btn btn-ghost btn-sm" id="rdata">${icon("database")}SFA Data</button></div><div class="card-b" id="rready"><span class="spinner"></span></div></div>
       </div>
       <div id="rres" style="margin-top:16px"></div>`;
@@ -556,52 +558,209 @@
     }
     $("#rdate").onchange = ready;
     $("#rdata").onclick = () => App.go("data");
-    $("#rgo").onclick = async () => {
-      const sel = $$(".rtype").filter((x) => x.checked).map((x) => x.value);
-      if (!sel.length) return toast("warning", "Choose at least one report");
+    $("#rstop").onclick = async () => { await call("reports_stop"); $("#rprogt").textContent = "Stopping after the current report…"; };
+    async function run(day, sel) {
+      const formats = [$("#fpdf").checked && "pdf", $("#fpng").checked && "png"].filter(Boolean);
       busy($("#rgo"), true, "Generating…");
-      const r = await call("reports_generate", $("#rdate").value, sel);
+      $("#rstop").classList.remove("hidden"); $("#rprog").classList.remove("hidden");
+      const poll = setInterval(async () => { const p = await call("reports_progress"); if (p.ok && p.text) $("#rprogt").textContent = p.text; }, 700);
+      $("#stopall").disabled = false; $("#gen").disabled = true;
+      const r = await call("reports_generate", day, sel, formats);
+      clearInterval(poll);
       busy($("#rgo"), false);
+      $("#rstop").classList.add("hidden"); $("#rprog").classList.add("hidden");
+      App.refreshStatus();
       if (!r.ok) return toast("error", "Generation failed", r.error);
-      $("#rres").innerHTML = `<div class="card"><div class="card-h">${icon("file")}<h3>Results — ${esc($("#rdate").value)}</h3><span class="spacer"></span>
+      showResults(day, r);
+      const good = r.results.filter((x) => x.status === "generated").map((x) => x.id);
+      if (good.length) previewSend(good, { day, sel, formats, rerun: () => run(day, sel) });
+      else toast("warning", "Nothing to preview", "No report was generated — see the results below.");
+    }
+    function showResults(day, r) {
+      $("#rres").innerHTML = `<div class="card"><div class="card-h">${icon("file")}<h3>Results — ${esc(day)}</h3>${r.stopped ? `<span class="chip warn">Stopped</span>` : ""}<span class="spacer"></span>
+          <button class="btn btn-primary btn-sm" id="rprev">${icon("eye")}Preview &amp; Send</button>
           <button class="btn btn-secondary btn-sm" id="rfold">${icon("folder")}Open folder</button></div><div class="card-b stack">
         ${r.results.map((x) => `<div class="panel"><div class="row wrap">
-            <span class="chip ${x.status === "generated" ? "ok" : x.status === "skipped" ? "" : "err"}">${esc(x.status)}</span><b>${esc(x.title)}</b><span class="spacer"></span>
-            ${x.path ? `<button class="btn btn-dark btn-sm" data-open="${esc(x.path)}">${icon("file")}Open Excel</button>` : ""}</div>
+            <span class="chip ${statusCls(x.status)}">${esc(x.status)}</span><b>${esc(x.title)}</b><span class="spacer"></span>
+            ${fileButtons({ xlsx_path: x.path, pdf_path: x.pdf, png_paths: x.pngs, exists: !!x.path, has_pdf: !!x.pdf })}</div>
           ${Object.keys(x.summary || {}).length ? `<div class="row wrap" style="gap:18px;margin-top:8px">${Object.entries(x.summary).map(([k, v]) => `<span><span class="faint">${esc(k)}</span> <b>${typeof v === "number" ? (Math.abs(v) < 5 && !Number.isInteger(v) ? (v * 100).toFixed(1) + "%" : money(v)) : esc(Array.isArray(v) ? v.join(", ") : v)}</b></span>`).join("")}</div>` : ""}
           ${x.error ? `<div class="alert ${x.status === "skipped" ? "info" : "err"}" style="margin-top:8px">${icon(x.status === "skipped" ? "info" : "error")}<div>${esc(x.error)}</div></div>` : ""}
-          ${(x.warnings || []).map((w) => `<div class="alert warn" style="margin-top:8px">${icon("warn")}<div>${esc(w)}</div></div>`).join("")}</div>`).join("")}
-        <div class="faint">PDF / PNG versions and the Preview &amp; Send pop-up arrive in Phase 8.</div></div></div>`;
+          ${(x.warnings || []).map((w) => `<div class="alert warn" style="margin-top:8px">${icon("warn")}<div>${esc(w)}</div></div>`).join("")}</div>`).join("")}</div></div>`;
       Hydra.hydrateIcons($("#rres"));
       $("#rfold").onclick = () => call("open_path", r.folder);
-      $$("[data-open]").forEach((b) => b.onclick = async () => { const o = await call("open_path", b.dataset.open); if (!o.ok) toast("error", "Cannot open", o.error); });
-      App.refreshStatus();
+      const good = r.results.filter((x) => x.status === "generated").map((x) => x.id);
+      $("#rprev").disabled = !good.length;
+      $("#rprev").onclick = () => previewSend(good, { rerun: () => $("#rgo").click() });
+      bindOpen($("#rres"));
+    }
+    $("#rgo").onclick = () => {
+      const sel = $$(".rtype").filter((x) => x.checked).map((x) => x.value);
+      if (!sel.length) return toast("warning", "Choose at least one report");
+      run($("#rdate").value, sel);
     };
     await ready();
+    if (opts && opts.autorun) $("#rgo").click();
+  }
+
+  const statusCls = (s) => ({ generated: "ok", approved: "ok", sent: "ok", saved: "ok", skipped: "" }[s] ?? "err");
+
+  function fileButtons(x) {
+    const b = [];
+    if (x.exists) b.push(`<button class="btn btn-dark btn-sm" data-open="${esc(x.xlsx_path)}">${icon("file")}Excel</button>`);
+    if (x.has_pdf || x.pdf_path) b.push(`<button class="btn btn-dark btn-sm" data-open="${esc(x.pdf_path)}">${icon("file")}PDF</button>`);
+    const pngs = x.png_paths || [];
+    if (pngs.length) b.push(`<button class="btn btn-dark btn-sm" data-open="${esc(pngs[0])}">${icon("image")}Image${pngs.length > 1 ? "s ×" + pngs.length : ""}</button>`);
+    return `<div class="row">${b.join("")}</div>`;
+  }
+  function bindOpen(root) {
+    $$("[data-open]", root).forEach((b) => b.onclick = async () => { const o = await call("open_path", b.dataset.open); if (!o.ok) toast("error", "Cannot open", o.error); });
+  }
+
+  // =============================================================== Preview & Send
+  async function previewSend(ids, opts = {}) {
+    const r = await call("reports_get", ids);
+    if (!r.ok || !r.reports.length) return toast("error", "Nothing to preview", r.error || "");
+    const reps = r.reports;
+    const st = await call("settings_get");
+    const cfg = (st.ok && st.settings) || {};
+    let cur = reps[0].id, page = 0, fmt = cfg["reports.send_format"] || "png";
+    const chosen = new Set(reps.filter((x) => x.status !== "failed").map((x) => x.id));
+    const back = document.createElement("div");
+    back.className = "modal-back";
+    back.innerHTML = `<div class="modal pv">
+      <div class="modal-h"><img src="assets/img/hydra_logo_silver.png" alt=""><h3>Preview &amp; Send</h3><span class="spacer"></span><span class="faint" style="font-size:12px">${esc(reps[0].report_date)}</span><button class="iconbtn" id="pvx" title="Close">${icon("x")}</button></div>
+      <div class="pv-body">
+        <div class="pv-list">
+          <label class="check pv-all"><input type="checkbox" id="pvall"> <b>Select all</b><span class="spacer"></span><span class="faint" id="pvcount"></span></label>
+          <div id="pvitems">${reps.map((x) => `<div class="pv-item" data-id="${x.id}">
+              <input type="checkbox" class="pvchk" value="${x.id}" ${chosen.has(x.id) ? "checked" : ""}>
+              <div class="pv-thumb" id="th${x.id}"><span class="spinner"></span></div>
+              <div class="pv-meta"><b>${esc(x.name)}</b><small class="faint">${x.pages ? x.pages + " image" + (x.pages > 1 ? "s" : "") : "No images"}${x.has_pdf ? " · PDF" : ""}</small>
+                <span class="chip ${statusCls(x.status)}">${esc(x.status)}</span>${(x.warnings || []).length ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</div></div>`).join("")}</div>
+          <div class="pv-opts stack">
+            <div class="field"><label>Send as</label><div class="seg" id="pvfmt">${["png", "pdf", "both"].map((f) => `<button data-f="${f}" class="${f === fmt ? "on" : ""}">${{ png: "Images", pdf: "PDF", both: "Both" }[f]}</button>`).join("")}</div></div>
+            <div class="field"><label>Caption</label><textarea class="input" id="pvcap" rows="2"></textarea><small class="faint">{title} and {date} are filled in for each report.</small></div>
+            <div class="alert info">${icon("message")}<div><b>Recipients</b>WhatsApp groups and contacts are set up in Phase 9. Until then, Approve marks the reports as ready to send.</div></div>
+          </div>
+        </div>
+        <div class="pv-view">
+          <div class="pv-bar"><b id="pvtitle"></b><span class="spacer"></span><button class="iconbtn" id="pvprev" title="Previous image">${icon("left")}</button><span class="mono" id="pvpage"></span><button class="iconbtn" id="pvnext" title="Next image">${icon("right")}</button></div>
+          <div class="pv-img" id="pvimg"><span class="spinner"></span></div>
+        </div>
+      </div>
+      <div class="modal-f">
+        <button class="btn btn-dark btn-stop" id="pvstop" title="Cancel — nothing is sent">${icon("stop")}Stop</button>
+        <button class="btn btn-secondary" id="pvref" title="Generate these reports again with the latest data">${icon("refresh")}Refresh</button>
+        <span class="spacer"></span>
+        <button class="btn btn-secondary" id="pvsave" title="Keep the files in the output folder without sending">${icon("download")}Save</button>
+        <button class="btn btn-primary" id="pvok">${icon("send")}Approve &amp; Send</button>
+      </div></div>`;
+    document.body.appendChild(back);
+    Hydra.hydrateIcons(back);
+    const q = (sel) => back.querySelector(sel);
+    q("#pvcap").value = cfg["reports.caption"] || "{title}";
+    const close = () => { back.remove(); document.removeEventListener("keydown", onKey); };
+    function onKey(e) {
+      if (e.key === "Escape") close();
+      if (e.key === "ArrowRight") step(1);
+      if (e.key === "ArrowLeft") step(-1);
+    }
+    document.addEventListener("keydown", onKey);
+    function counter() {
+      q("#pvcount").textContent = `${chosen.size} of ${reps.length} selected`;
+      q("#pvall").checked = chosen.size === reps.length;
+      q("#pvall").indeterminate = chosen.size > 0 && chosen.size < reps.length;
+      q("#pvok").disabled = q("#pvsave").disabled = !chosen.size;
+      back.querySelectorAll(".pv-item").forEach((el) => el.classList.toggle("off", !chosen.has(+el.dataset.id)));
+    }
+    async function show() {
+      const x = reps.find((y) => y.id === cur);
+      back.querySelectorAll(".pv-item").forEach((el) => el.classList.toggle("on", +el.dataset.id === cur));
+      q("#pvtitle").textContent = x.title;
+      if (!x.pages) {
+        q("#pvimg").innerHTML = `<div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No image for this report</h3>${esc((x.warnings || []).find((w) => w.startsWith("PDF/PNG")) || "Images were not created for this run.")}</div>`;
+        q("#pvpage").textContent = ""; q("#pvprev").disabled = q("#pvnext").disabled = true; return;
+      }
+      q("#pvimg").innerHTML = `<span class="spinner"></span>`;
+      const im = await call("report_image", cur, page);
+      if (!im.ok) { q("#pvimg").innerHTML = `<div class="alert err">${esc(im.error)}</div>`; return; }
+      if (x.id !== cur) return;
+      page = im.page;
+      q("#pvimg").innerHTML = `<img src="${im.src}" alt="">`;
+      q("#pvpage").textContent = `${im.page + 1} / ${im.pages}`;
+      q("#pvprev").disabled = im.page === 0; q("#pvnext").disabled = im.page >= im.pages - 1;
+    }
+    function step(d) {
+      const x = reps.find((y) => y.id === cur);
+      const i = reps.indexOf(x);
+      if (page + d >= 0 && page + d < (x.pages || 0)) { page += d; return show(); }
+      const n = reps[i + d]; if (!n) return;
+      cur = n.id; page = d < 0 ? Math.max(0, (n.pages || 1) - 1) : 0; show();
+    }
+    back.querySelectorAll(".pv-item").forEach((el) => el.onclick = (e) => {
+      if (e.target.classList.contains("pvchk")) return;
+      cur = +el.dataset.id; page = 0; show();
+    });
+    back.querySelectorAll(".pvchk").forEach((c) => c.onchange = () => { c.checked ? chosen.add(+c.value) : chosen.delete(+c.value); counter(); });
+    q("#pvall").onchange = (e) => {
+      reps.forEach((x) => e.target.checked ? chosen.add(x.id) : chosen.delete(x.id));
+      back.querySelectorAll(".pvchk").forEach((c) => c.checked = e.target.checked); counter();
+    };
+    back.querySelectorAll("#pvfmt button").forEach((b) => b.onclick = () => { fmt = b.dataset.f; back.querySelectorAll("#pvfmt button").forEach((y) => y.classList.toggle("on", y === b)); });
+    q("#pvprev").onclick = () => step(-1); q("#pvnext").onclick = () => step(1);
+    q("#pvx").onclick = close;
+    q("#pvstop").onclick = () => { close(); toast("info", "Stopped", "Nothing was sent. The reports stay in Reports History."); };
+    q("#pvref").onclick = () => { close(); if (opts.rerun) opts.rerun(); else toast("info", "Refresh", "Open the Run Center to generate again."); };
+    async function mark(status, msg) {
+      const ids = [...chosen];
+      const s = await call("reports_set_status", ids, status);
+      if (!s.ok) return toast("error", "Could not update", s.error);
+      await call("settings_save", { "reports.send_format": fmt, "reports.caption": q("#pvcap").value });
+      close(); toast("success", msg, `${s.updated} report(s)`);
+      if (location.hash === "#reports") App.go("reports");
+    }
+    q("#pvsave").onclick = () => mark("saved", "Saved to the output folder");
+    q("#pvok").onclick = () => mark("approved", "Approved — WhatsApp sending arrives in Phase 9");
+    counter();
+    show();
+    // thumbnails (first image of each report)
+    for (const x of reps) {
+      const th = q("#th" + x.id);
+      if (!x.pages) { th.innerHTML = icon("file"); Hydra.hydrateIcons(th); continue; }
+      call("report_image", x.id, 0).then((im) => { th.innerHTML = im.ok && im.src ? `<img src="${im.src}" alt="">` : ""; });
+    }
   }
 
   // =============================================================== Reports History
   async function reportsHistory(main) {
     const types = (await call("reports_types")).types;
-    main.innerHTML = `${head("History", "Reports History", "Every report Hydra has generated. Approve / send to WhatsApp arrives with Phases 8–9.")}
+    main.innerHTML = `${head("History", "Reports History", "Every report Hydra has generated. Tick reports and press Preview &amp; Send to approve them again or resend.")}
       <div class="row wrap" style="margin-bottom:12px"><select class="input select" id="hType" style="width:240px"><option value="">All reports</option>${types.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>
-        <select class="input select" id="hStat" style="width:180px"><option value="">Any status</option><option>generated</option><option>failed</option><option>skipped</option></select></div>
+        <select class="input select" id="hStat" style="width:180px"><option value="">Any status</option>${["generated", "approved", "saved", "sent", "failed", "skipped"].map((x) => `<option>${x}</option>`).join("")}</select>
+        <span class="spacer"></span><span class="faint" id="hsel"></span><button class="btn btn-primary" id="hprev" disabled>${icon("eye")}Preview &amp; Send</button></div>
       <div class="card"><div class="card-b" id="hlist"><span class="spinner"></span></div></div>`;
+    const picked = new Set();
+    function upd() { $("#hprev").disabled = !picked.size; $("#hsel").textContent = picked.size ? `${picked.size} selected` : ""; }
     async function load() {
       const r = await call("reports_history", $("#hType").value, $("#hStat").value);
       if (!r.ok) throw new Error(r.error);
-      $("#hlist").innerHTML = r.reports.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Report date</th><th>Report</th><th>Generated</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
-        ${r.reports.map((x) => `<tr><td class="mono">${esc(x.report_date)}</td><td><b>${esc(x.name)}</b><br><small class="faint">${esc(x.title)}</small></td><td class="faint">${fmtTime(x.created_at)}</td><td class="faint">${esc(x.created_by || "")}</td>
-          <td><span class="chip ${x.status === "generated" ? "ok" : x.status === "skipped" ? "" : "err"}" title="${esc((x.warnings || []).join("\n"))}">${esc(x.status)}</span>${x.warnings.length && x.status === "generated" ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</td>
-          <td>${x.exists ? `<div class="row"><button class="btn btn-dark btn-sm" data-open="${esc(x.xlsx_path)}">${icon("file")}Excel</button></div>` : x.xlsx_path ? `<span class="faint">File moved</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      picked.clear(); upd();
+      $("#hlist").innerHTML = r.reports.length ? `<div class="table-wrap"><table class="table"><thead><tr><th style="width:30px"><input type="checkbox" id="hall"></th><th>Report date</th><th>Report</th><th>Generated</th><th>By</th><th>Status</th><th>Files</th></tr></thead><tbody>
+        ${r.reports.map((x) => `<tr><td>${x.status === "failed" || x.status === "skipped" ? "" : `<input type="checkbox" class="hchk" value="${x.id}">`}</td><td class="mono">${esc(x.report_date)}</td><td><b>${esc(x.name)}</b><br><small class="faint">${esc(x.title)}</small></td><td class="faint">${fmtTime(x.created_at)}</td><td class="faint">${esc(x.created_by || "")}</td>
+          <td><span class="chip ${statusCls(x.status)}" title="${esc((x.warnings || []).join("\n"))}">${esc(x.status)}</span>${x.warnings.length && x.status !== "failed" && x.status !== "skipped" ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</td>
+          <td>${x.exists ? fileButtons(x) : x.xlsx_path ? `<span class="faint">Files moved</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No reports yet</h3>Generate them in the Run Center.</div>`;
       Hydra.hydrateIcons($("#hlist"));
-      $$("[data-open]").forEach((b) => b.onclick = async () => { const o = await call("open_path", b.dataset.open); if (!o.ok) toast("error", "Cannot open", o.error); });
+      bindOpen($("#hlist"));
+      $$(".hchk").forEach((c) => c.onchange = () => { c.checked ? picked.add(+c.value) : picked.delete(+c.value); upd(); });
+      const all = $("#hall");
+      if (all) all.onchange = () => $$(".hchk").forEach((c) => { c.checked = all.checked; c.onchange(); });
     }
     $("#hType").onchange = load; $("#hStat").onchange = load;
+    $("#hprev").onclick = () => previewSend([...picked]);
     await load();
   }
 
-  window.Pages = { run: runCenter, reports: reportsHistory, targets: targetsPage, dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues, data: dataPage, territories: territoriesPage };
+  window.Pages = { previewSend, run: runCenter, reports: reportsHistory, targets: targetsPage, dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues, data: dataPage, territories: territoriesPage };
   Object.keys(PLAN).forEach((k) => window.Pages[k] = placeholder);
 })();

@@ -53,6 +53,9 @@ DEFAULTS: dict = {
     "setup.completed_steps": [],
     # Reports
     "reports.title_prefix": "",
+    "reports.formats": ["pdf", "png"],          # extra formats beside Excel
+    "reports.send_format": "png",               # png | pdf | both  (Preview & Send default)
+    "reports.caption": "{title}",               # WhatsApp caption template
     # Notifications
     "notifications.windows_toasts": True,
     "notifications.sound": False,

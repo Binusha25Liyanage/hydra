@@ -7,9 +7,20 @@ from datetime import date
 from pathlib import Path
 
 from .. import db, paths, settings
+from .. import services
 from . import excel
-from .builders import BUILDERS, REPORT_TYPES
-from .context import Context, ReportError
+
+
+class ReportError(Exception):
+    """A report could not be built (message is shown to the user)."""
+
+
+def _is_report_error(e: Exception) -> bool:
+    return isinstance(e, ReportError) or type(e).__name__ == "ReportError"
+
+
+def report_types() -> dict[str, str]:
+    return {rid: r.name for rid, (_, r) in services.all_reports().items()}
 
 log = logging.getLogger("hydra.reports")
 
@@ -20,69 +31,130 @@ def output_dir(d: date) -> Path:
 
 
 def build(d: date, report_type: str):
-    ctx = Context(d, fallback_hierarchy=(report_type == "sales_comparison"))
-    return BUILDERS[report_type](ctx)
+    return services.report(report_type)[1].build(d)
 
 
-def generate(d: date, types: list[str] | None = None, user: str | None = None, run_id: int | None = None) -> list[dict]:
-    types = [t for t in (types or list(BUILDERS)) if t in BUILDERS]
+def readiness(d: date) -> list[dict]:
+    """Data check of every installed service, for the Run Center."""
+    items = []
+    for svc in services.all_services().values():
+        if svc.readiness:
+            items += svc.readiness(d)
+    return items
+
+
+def generate(d: date, types: list[str] | None = None, user: str | None = None, run_id: int | None = None,
+             formats: tuple[str, ...] = ("pdf", "png"), stop=None, progress=None) -> list[dict]:
+    """Build every selected report: Excel always, PDF/PNG when a browser is available.
+    `stop()` -> True ends the run between reports; `progress(text)` reports what is happening."""
+    names = report_types()
+    types = [t for t in (types or list(names)) if t in names]
     results = []
-    for t in types:
-        name = REPORT_TYPES[t]
-        try:
-            table = build(d, t)
-            path = excel.write(table, output_dir(d) / f"{table.file_stem}.xlsx")
-            status, title, warnings, summary, err = "generated", table.title, table.warnings, table.summary, ""
-        except ReportError as e:
-            path, status, title, warnings, summary, err = None, "skipped" if "skipped" in str(e) else "failed", name, [], {}, str(e)
-        except Exception as e:   # never let one report stop the others
-            log.exception("Report %s failed", t)
-            path, status, title, warnings, summary, err = None, "failed", name, [], {}, f"{type(e).__name__}: {e}"
-        cur = db.conn().execute(
-            "INSERT INTO reports(run_id, report_type, report_date, title, xlsx_path, status, summary_json, warnings_json, "
-            "created_at, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (run_id, t, d.isoformat(), title, str(path) if path else None, status, json.dumps(summary, default=str),
-             json.dumps(warnings + ([err] if err else [])), db.now_iso(), user))
-        log.info("Report %s for %s: %s%s", name, d, status, f" ({err})" if err else "")
-        results.append({"id": cur.lastrowid, "type": t, "name": name, "title": title, "status": status,
-                        "path": str(path) if path else "", "warnings": warnings, "error": err, "summary": summary})
+    from .render import Renderer
+    with Renderer() if formats else _NoRender() as rnd:
+        for t in types:
+            name = names[t]
+            if stop and stop():
+                results.append(_record(run_id, t, d, name, None, None, [], "skipped", [], {}, "Stopped by user", user))
+                continue
+            if progress:
+                progress(f"Building {name}")
+            pdf, pngs, path = None, [], None
+            try:
+                table = build(d, t)
+                path = excel.write(table, output_dir(d) / f"{table.file_stem}.xlsx")
+                status, title, warnings, summary, err = "generated", table.title, list(table.warnings), table.summary, ""
+                if formats:
+                    if rnd.ok:
+                        if progress:
+                            progress(f"Rendering {name} (PDF / images)")
+                        try:
+                            pdf, pngs = rnd.render(table, path, pdf="pdf" in formats, png="png" in formats)
+                        except Exception as e:
+                            log.exception("Render %s failed", t)
+                            warnings.append(f"PDF/PNG not created: {e}")
+                    else:
+                        warnings.append(f"PDF/PNG not created: {rnd.error}")
+            except Exception as e:   # never let one report stop the others
+                if not _is_report_error(e):
+                    log.exception("Report %s failed", t)
+                    status, title, warnings, summary, err = "failed", name, [], {}, f"{type(e).__name__}: {e}"
+                else:
+                    status, title, warnings, summary, err = ("skipped" if "skipped" in str(e) else "failed"), name, [], {}, str(e)
+            results.append(_record(run_id, t, d, title, path, pdf, pngs, status, warnings, summary, err, user, name))
     done = ", ".join(r["type"] + "=" + r["status"] for r in results)
     db.audit(user, "reports.generate", f"{d} {done}")
     return results
 
 
-def readiness(d: date) -> list[dict]:
-    """What data exists for a report date — shown in the Run Center before generating."""
-    from .context import _prev_working
-    c = db.conn()
-    ds = d.isoformat()
-    prev = _prev_working(d).isoformat()
-    month = d.strftime("%Y-%m")
-    tm = c.execute("SELECT nowd FROM target_months WHERE month=?", (month,)).fetchone()
-    has_h = c.execute("SELECT 1 FROM hierarchy_nodes WHERE month=? LIMIT 1", (month,)).fetchone() is not None
-    sku = c.execute("SELECT COUNT(*), ROUND(SUM(sales_value),2) FROM sku_lines WHERE date=?", (ds,)).fetchone()
-    cal = c.execute("SELECT COUNT(*) FROM callage_lines WHERE date=?", (ds,)).fetchone()[0] or \
-        c.execute("SELECT COUNT(*) FROM callage_prepared WHERE date=?", (ds,)).fetchone()[0]
-    calp = c.execute("SELECT COUNT(*) FROM callage_lines WHERE date=?", (prev,)).fetchone()[0] or \
-        c.execute("SELECT COUNT(*) FROM callage_prepared WHERE date=? AND source='famulus'", (ds,)).fetchone()[0]
-    so = c.execute("SELECT COUNT(DISTINCT import_id), COUNT(*) FROM sales_orders WHERE date=?", (ds,)).fetchone()
-    unset = c.execute("SELECT COUNT(*) FROM territories WHERE selling_mode IS NULL AND is_smmt=0").fetchone()[0]
-    return [
-        {"item": f"Targets for {d:%B %Y}", "ok": has_h, "detail": "Set" if has_h else "Import on Hierarchy & Targets",
-         "needed_by": "All except Sales Comparison"},
-        {"item": "Working days (NOWD)", "ok": bool(tm and tm["nowd"]), "detail": str(tm["nowd"]) if tm and tm["nowd"] else "Not set",
-         "needed_by": "Day Report"},
-        {"item": f"SKU sales {ds}", "ok": sku[0] > 0, "detail": f"{sku[0]:,} rows · {sku[1] or 0:,.2f}" if sku[0] else "Not imported",
-         "needed_by": "All"},
-        {"item": f"Callage {ds} (Van)", "ok": cal > 0, "detail": f"{cal} rows" if cal else "Not imported",
-         "needed_by": "Day Report, Daily Winners"},
-        {"item": f"Callage {prev} (Pre)", "ok": calp > 0, "detail": f"{calp} rows" if calp else "Not imported",
-         "needed_by": "Day Report, Daily Winners"},
-        {"item": f"Pre-Selling orders {ds}", "ok": so[0] > 0, "detail": f"{so[0]} snapshot(s)" if so[0] else "Not imported",
-         "needed_by": "Pending Order Value"},
-        {"item": "Van / Pre for every territory", "ok": unset == 0, "detail": "All set" if not unset else f"{unset} not set",
-         "needed_by": "Callage, Pending Orders"},
-    ]
+class _NoRender:
+    ok, error = False, "PDF/PNG turned off"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        pass
+
+
+def _record(run_id, t, d, title, path, pdf, pngs, status, warnings, summary, err, user, name=None) -> dict:
+    cur = db.conn().execute(
+        "INSERT INTO reports(run_id, report_type, report_date, title, xlsx_path, pdf_path, png_paths, status, "
+        "summary_json, warnings_json, created_at, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (run_id, t, d.isoformat(), title, str(path) if path else None, str(pdf) if pdf else None,
+         json.dumps([str(p) for p in pngs]), status, json.dumps(summary, default=str),
+         json.dumps(warnings + ([err] if err else [])), db.now_iso(), user))
+    log.info("Report %s for %s: %s%s", name or title, d, status, f" ({err})" if err else "")
+    return {"id": cur.lastrowid, "type": t, "name": name or title, "title": title, "status": status,
+            "path": str(path) if path else "", "pdf": str(pdf) if pdf else "", "pngs": [str(p) for p in pngs],
+            "warnings": warnings, "error": err, "summary": summary}
+
+
+def get(report_id: int) -> dict | None:
+    r = db.conn().execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
+    return _row(r, report_types()) if r else None
+
+
+def set_status(ids: list[int], status: str, user: str | None = None) -> int:
+    if status not in ("generated", "approved", "sent", "saved", "skipped"):
+        raise ValueError(f"Bad status {status}")
+    ids = [int(i) for i in ids]
+    if not ids:
+        return 0
+    with db.tx() as c:
+        n = c.execute(f"UPDATE reports SET status=? WHERE id IN ({','.join('?' * len(ids))}) AND status!='failed'",
+                      [status, *ids]).rowcount
+    db.audit(user, f"reports.{status}", ",".join(map(str, ids)))
+    return n
+
+
+def image(report_id: int, page: int = 0) -> dict:
+    """A report's PNG page as a data URL for the preview (falls back to nothing if not rendered)."""
+    import base64
+    r = get(report_id)
+    if not r:
+        raise ValueError("Report not found")
+    pngs = [p for p in r["png_paths"] if Path(p).exists()]
+    if not pngs:
+        return {"src": "", "page": 0, "pages": 0}
+    page = max(0, min(page, len(pngs) - 1))
+    data = base64.b64encode(Path(pngs[page]).read_bytes()).decode()
+    return {"src": "data:image/png;base64," + data, "page": page, "pages": len(pngs)}
+
+
+def _row(r, names) -> dict:
+    x = dict(r)
+    x["summary"] = json.loads(x.pop("summary_json") or "{}")
+    x["warnings"] = json.loads(x.pop("warnings_json") or "[]")
+    try:
+        x["png_paths"] = json.loads(x.get("png_paths") or "[]")
+    except ValueError:
+        x["png_paths"] = []
+    x["name"] = names.get(x["report_type"], x["report_type"])
+    x["exists"] = bool(x["xlsx_path"]) and Path(x["xlsx_path"]).exists()
+    x["has_pdf"] = bool(x.get("pdf_path")) and Path(x["pdf_path"]).exists()
+    x["pages"] = sum(1 for p in x["png_paths"] if Path(p).exists())
+    return x
 
 
 def history(limit: int = 300, report_type: str = "", status: str = "") -> list[dict]:
@@ -95,12 +167,5 @@ def history(limit: int = 300, report_type: str = "", status: str = "") -> list[d
         args.append(status)
     q += " ORDER BY id DESC LIMIT ?"
     args.append(limit)
-    out = []
-    for r in db.conn().execute(q, args):
-        x = dict(r)
-        x["summary"] = json.loads(x.pop("summary_json"))
-        x["warnings"] = json.loads(x.pop("warnings_json"))
-        x["name"] = REPORT_TYPES.get(x["report_type"], x["report_type"])
-        x["exists"] = bool(x["xlsx_path"]) and Path(x["xlsx_path"]).exists()
-        out.append(x)
-    return out
+    names = report_types()
+    return [_row(r, names) for r in db.conn().execute(q, args)]

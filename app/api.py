@@ -14,6 +14,7 @@ import platform
 import subprocess
 import sys
 from pathlib import Path
+import threading as _threading
 
 from . import auth, db, logging_setup, notify, paths, settings, version
 from .startup import StartupSequence
@@ -56,6 +57,10 @@ def api_method(fn):
             log.exception("API %s failed", fn.__name__)
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     return wrapper
+
+
+_RUN_LOCK = _threading.Lock()
+_RUN: dict = {"running": False, "text": "", "stop": None}
 
 
 class Api:
@@ -375,8 +380,9 @@ class Api:
     @api_method
     def reports_types(self):
         auth.require()
-        from .reports.builders import REPORT_TYPES
-        return {"types": [{"id": k, "name": v} for k, v in REPORT_TYPES.items()]}
+        from . import services
+        return {"types": [{"id": r.id, "name": r.name, "service": s.id, "service_name": s.name, "default_on": r.default_on}
+                          for s in services.all_services().values() for r in s.reports]}
 
     @api_method
     def reports_readiness(self, day):
@@ -386,17 +392,61 @@ class Api:
         return {"items": engine.readiness(_d.fromisoformat(day))}
 
     @api_method
-    def reports_generate(self, day, types):
+    def reports_generate(self, day, types, formats=None):
         user = auth.require()
+        import threading
         from datetime import date as _d
         from .reports import engine
-        res = engine.generate(_d.fromisoformat(day), list(types or []), user["username"])
+        with _RUN_LOCK:
+            if _RUN["running"]:
+                return {"ok": False, "error": "A run is already in progress"}
+            _RUN.update(running=True, text="Starting…", stop=threading.Event(), day=day, started=db.now_iso())
+        try:
+            fm = tuple(formats) if formats is not None else tuple(settings.get("reports.formats") or ("pdf", "png"))
+            res = engine.generate(_d.fromisoformat(day), list(types or []), user["username"], formats=fm,
+                                  stop=_RUN["stop"].is_set, progress=lambda t: _RUN.update(text=t))
+        finally:
+            _RUN.update(running=False, text="")
         ok = [r for r in res if r["status"] == "generated"]
         bad = [r for r in res if r["status"] == "failed"]
-        notify.add("reports", "error" if bad else "success",
-                   f"{len(ok)} report(s) generated for {day}" + (f", {len(bad)} failed" if bad else ""),
+        stopped = _RUN["stop"].is_set()
+        notify.add("reports", "error" if bad else ("warning" if stopped else "success"),
+                   f"{len(ok)} report(s) generated for {day}" + (f", {len(bad)} failed" if bad else "") + (" — stopped" if stopped else ""),
                    "; ".join(f"{r['name']}: {r['error']}" for r in res if r["error"])[:400], "reports")
-        return {"results": res, "folder": str(engine.output_dir(_d.fromisoformat(day)))}
+        return {"results": res, "folder": str(engine.output_dir(_d.fromisoformat(day))), "stopped": stopped}
+
+    @api_method
+    def reports_progress(self):
+        auth.require()
+        return {"running": _RUN["running"], "text": _RUN["text"], "day": _RUN.get("day")}
+
+    @api_method
+    def reports_stop(self):
+        user = auth.require()
+        if _RUN["running"] and _RUN.get("stop"):
+            _RUN["stop"].set()
+            db.audit(user["username"], "reports.stop", _RUN.get("day") or "")
+            return {"stopping": True}
+        return {"stopping": False}
+
+    @api_method
+    def reports_get(self, ids):
+        auth.require()
+        from .reports import engine
+        return {"reports": [r for r in (engine.get(int(i)) for i in ids or []) if r]}
+
+    @api_method
+    def report_image(self, report_id, page=0):
+        auth.require()
+        from .reports import engine
+        return engine.image(int(report_id), int(page or 0))
+
+    @api_method
+    def reports_set_status(self, ids, status):
+        user = auth.require()
+        from .reports import engine
+        n = engine.set_status(list(ids or []), status, user["username"])
+        return {"updated": n}
 
     @api_method
     def reports_history(self, report_type="", status=""):
@@ -535,6 +585,7 @@ class Api:
                     "display_name": sfa.get("display_name", ""), "ts": sfa.get("ts", "")},
             "whatsapp": wa_status.status(),
             "worker": {"state": "not_installed", "label": "Scheduler arrives in Phase 10"},
+            "run": {"running": _RUN["running"], "text": _RUN["text"]},
             "next_run": None,
             "data_today_mb": 0.0,
             "unread": notify.unread_count(),

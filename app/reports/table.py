@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .context import LEVEL_NAMES, Node
+LEVEL_NAMES = {0: "National", 1: "Region", 2: "RSM", 3: "ASM", 4: "DTM", 5: "ASE", 6: "Territory"}
 
 
 @dataclass
@@ -56,7 +56,7 @@ class Table:
         return next((r for r in self.rows if r.label == label), None)
 
 
-def subtotal_label(n: Node) -> str:
+def subtotal_label(n) -> str:
     if n.level == 0:
         return "NATIONAL TOTAL"
     return f"{n.label}  ({LEVEL_NAMES[n.level]} Total)"
@@ -68,14 +68,14 @@ def apply_formulas(columns: list[Column], values: dict) -> None:
             values[c.key] = c.calc(values)
 
 
-def hierarchy_rows(root: Node, columns: list[Column], territory_values: Callable[[Node], dict],
+def hierarchy_rows(root, columns: list[Column], territory_values: Callable[[object], dict],
                    extra_group: tuple[str, list[tuple[str, dict]]] | None = None) -> list[Row]:
     """Territories followed by their subtotal rows (bottom-up, like the NSM sheet), then NATIONAL TOTAL.
     `extra_group` = ("Unmatched Territories", [(name, values), ...]) is added under National."""
     rows: list[Row] = []
     sum_cols = [c.key for c in columns if c.sum and c.calc is None and c.kind != "text"]
 
-    def emit(n: Node) -> int:
+    def emit(n) -> int:
         if n.is_territory:
             v = territory_values(n)
             apply_formulas(columns, v)

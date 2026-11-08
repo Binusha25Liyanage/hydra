@@ -130,3 +130,34 @@ def test_generate_writes_excel_with_formulas(nov3, tmp_path):
     ws = openpyxl.load_workbook(next(r["path"] for r in res if r["type"] == "day_report")).active
     assert ws["E5"].value == "=IF(C5=0,0,D5/C5)" and ws["A100"].value == "NATIONAL TOTAL"
     assert ws["B100"].value.startswith("=SUM(")
+
+
+def test_generate_renders_pdf_and_whatsapp_images(nov3, tmp_path):
+    from app import settings
+    from app.reports import render
+    settings.set("output.root", str(tmp_path))
+    res = engine.generate(D, ["day_report", "daily_winners"], user="test")
+    for r in res:
+        assert r["status"] == "generated", r
+        if any("PDF/PNG not created" in w for w in r["warnings"]):
+            pytest.skip("no browser in this environment")
+        assert r["pdf"].endswith(".pdf") and Path(r["pdf"]).stat().st_size > 5000
+        assert r["pngs"] and all(Path(p).exists() for p in r["pngs"])
+    day = next(r for r in res if r["type"] == "day_report")
+    assert len(day["pngs"]) >= 2                       # ~100 rows -> several WhatsApp images
+    img = engine.image(day["id"], 1)
+    assert img["src"].startswith("data:image/png;base64,") and img["pages"] == len(day["pngs"])
+    assert engine.set_status([day["id"]], "approved", "test") == 1
+    assert engine.get(day["id"])["status"] == "approved"
+    # chunks never leave a tiny last image and cover every row once
+    rows = engine.build(D, "day_report").rows
+    parts = render.chunks(rows)
+    assert sum(len(p) for p in parts) == len(rows) and min(len(p) for p in parts) > 6
+
+
+def test_service_registry():
+    from app import services
+    svc = services.all_services()["sales_reports"]
+    assert [r.id for r in svc.reports] == ["day_report", "target_vs_achievement", "sales_comparison",
+                                          "daily_winners", "pending_orders"]
+    assert services.report("day_report")[0].id == "sales_reports"

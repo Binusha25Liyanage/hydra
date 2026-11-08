@@ -9,7 +9,7 @@
   };
   window.App = { user: null, status: null, go, refreshStatus };
 
-  function go(page) {
+  function go(page, opts) {
     if (!TITLES[page]) page = "dashboard";
     $$("#nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === page));
     $("#crumb").textContent = TITLES[page];
@@ -17,7 +17,7 @@
     main.scrollTop = 0;
     main.innerHTML = `<div class="row faint"><span class="spinner"></span>Loading…</div>`;
     if (history.replaceState) history.replaceState(null, "", "#" + page);
-    Promise.resolve((Pages[page] || Pages.placeholder)(main, page)).then(() => Hydra.hydrateIcons(main)).catch((e) => {
+    Promise.resolve((Pages[page] || Pages.placeholder)(main, page, opts)).then(() => Hydra.hydrateIcons(main)).catch((e) => {
       main.innerHTML = `<div class="alert err">${icon("error")}<div><b>Could not open ${esc(TITLES[page])}</b>${esc(e.message || e)}</div></div>`;
     });
   }
@@ -40,6 +40,11 @@
     $("#s-worker").textContent = s.worker.state === "not_installed" ? "Not installed (Phase 10)" : s.worker.label;
     $("#s-sfa").textContent = sfa.ts ? fmtAgo(sfa.ts) + (sfa.logged_in ? " · OK" : " · failed") : "—";
     $("#s-ver").textContent = "Hydra v" + s.version;
+    const run = s.run || {};
+    $("#stopall").disabled = !run.running;
+    $("#stopall").title = run.running ? "Stop the current run: " + (run.text || "") : "Nothing is running";
+    $("#gen").disabled = !!run.running;
+    $("#s-worker").textContent = run.running ? "Running — " + (run.text || "") : $("#s-worker").textContent;
     $("#vbadge").textContent = "v" + s.version.split(".").slice(0, 2).join(".");
   }
 
@@ -67,6 +72,11 @@
     if (!e.target.closest("#umenu,#avatar")) $("#umenu").classList.add("hidden");
   });
 
+  $("#gen").onclick = () => go("run", { autorun: true });
+  $("#stopall").onclick = async () => {
+    const r = await call("reports_stop");
+    toast(r.stopping ? "warning" : "info", r.stopping ? "Stopping…" : "Nothing is running", r.stopping ? "The run stops after the current report." : "");
+  };
   $("#collapse").onclick = () => document.body.classList.toggle("collapsed");
   $$("#nav a").forEach((a) => a.onclick = () => go(a.dataset.page));
 

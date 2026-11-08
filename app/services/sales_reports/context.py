@@ -19,7 +19,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from .. import db
+from ... import db
 
 EXCLUDED_SMMT = {"colombosmmt", "kandysmmt", "anuradhapurasmmt"}   # never in Winners / Pending Orders
 LEVEL_NAMES = {0: "National", 1: "Region", 2: "RSM", 3: "ASM", 4: "DTM", 5: "ASE", 6: "Territory"}
