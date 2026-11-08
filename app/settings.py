@@ -42,6 +42,30 @@ DEFAULTS: dict = {
         # Any of these visible after login means "logged in"
         "logged_in": ["text=/Welcome,/i", "text=REPORTS", "text=DASHBOARD"],
     },
+    # WhatsApp Web (Phase 9). Selectors are lists: the first one found is used, so a WhatsApp
+    # page change can be fixed in Settings without a new Hydra version.
+    "whatsapp.url": "https://web.whatsapp.com",
+    "whatsapp.headless": True,
+    "whatsapp.send_timeout_s": 90,
+    "whatsapp.gap_s": 3,                 # pause between messages (looks less like a bot)
+    "whatsapp.selectors": {
+        "qr": ['canvas[aria-label*="Scan"]', "div[data-ref] canvas", 'canvas[role="img"]'],
+        "logged_in": ["#pane-side", 'div[aria-label="Chat list"]', '[data-icon="new-chat-outline"]', '[data-testid="chat-list"]'],
+        "search": ['div[contenteditable="true"][data-tab="3"]', '[aria-label="Search input textbox"]',
+                   'div[role="textbox"][aria-label*="Search"]', 'input[aria-label*="Search"]'],
+        "chat_title": ['#pane-side span[title="{name}"]', 'span[title="{name}"]'],
+        "composer": ['footer div[contenteditable="true"]', 'div[contenteditable="true"][data-tab="10"]',
+                     'div[role="textbox"][aria-label*="message" i]'],
+        "attach": ['[data-icon="plus-rounded"]', '[data-icon="plus"]', '[data-icon="attach-menu-plus"]', '[data-icon="clip"]',
+                   'button[title="Attach"]', 'div[title="Attach"]'],
+        "media_input": ['input[type="file"][accept*="image"]'],
+        "document_input": ['input[type="file"][accept="*"]', 'input[type="file"]:not([accept*="image"])'],
+        "caption": ['div[aria-label="Add a caption"]', 'div[role="textbox"][aria-label*="caption" i]',
+                    'div[contenteditable="true"][data-tab="10"]'],
+        "send": ['[data-icon="send"]', 'div[role="button"][aria-label="Send"]', 'button[aria-label="Send"]', '[data-icon="wds-ic-send-filled"]'],
+        "pending": ['div.message-out [data-icon="msg-time"]'],
+        "invalid_phone": ['text=/Phone number shared via url is invalid/i'],
+    },
     # Output
     "output.root": "",
     # Startup

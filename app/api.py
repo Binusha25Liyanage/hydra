@@ -516,6 +516,179 @@ class Api:
         except (ExportError, ValueError) as e:
             return {"ok": False, "error": str(e)}
 
+    # =========================================================== Phase 5: planning (targets editor, competition, aliases)
+    @staticmethod
+    def _plan(name, *args, edit=True):
+        user = auth.require("superadmin", "admin") if edit else auth.require()
+        from .services.sales_reports import planning
+        try:
+            fn = getattr(planning, name)
+            out = fn(*args, user=user["username"]) if edit else fn(*args)
+        except planning.PlanningError as e:
+            return {"ok": False, "error": str(e)}
+        return out if isinstance(out, dict) else {"ok": True, "result": out}
+
+    @api_method
+    def targets_update(self, changes):
+        return self._plan("update_nodes", changes)
+
+    @api_method
+    def targets_add(self, parent_id, label, target=0, is_smmt=False):
+        return self._plan("add_node", parent_id, label, target, is_smmt)
+
+    @api_method
+    def targets_move(self, node_id, parent_id):
+        return self._plan("move_node", node_id, parent_id)
+
+    @api_method
+    def targets_delete(self, node_id):
+        return self._plan("delete_node", node_id)
+
+    @api_method
+    def targets_parents(self, month, level):
+        return {"parents": self._plan("parents_for", month, int(level), edit=False)["result"]}
+
+    @api_method
+    def targets_copy_month(self, src, dst, keep_targets=True):
+        return self._plan("copy_month", src, dst, bool(keep_targets))
+
+    @api_method
+    def targets_delete_month(self, month):
+        return self._plan("delete_month", month)
+
+    @api_method
+    def targets_lock(self, month, locked):
+        return self._plan("set_locked", month, bool(locked))
+
+    @api_method
+    def competition_month(self, month):
+        return self._plan("rounds", month, edit=False)
+
+    @api_method
+    def competition_save_round(self, month, data):
+        return self._plan("save_round", month, data)
+
+    @api_method
+    def competition_delete_round(self, round_id):
+        return self._plan("delete_round", round_id)
+
+    @api_method
+    def competition_save_days(self, month, assignment):
+        return self._plan("save_days", month, assignment)
+
+    @api_method
+    def competition_copy(self, src, dst):
+        return self._plan("copy_rounds", src, dst)
+
+    @api_method
+    def aliases_month(self, month):
+        return self._plan("aliases", month, edit=False)
+
+    @api_method
+    def aliases_set(self, node_id, sfa_name):
+        return self._plan("set_alias", node_id, sfa_name)
+
+    @api_method
+    def outlets_list(self, month=""):
+        return {"outlets": self._plan("outlets", month or None, edit=False)["result"]}
+
+    @api_method
+    def outlets_set(self, category_key, label, include):
+        return self._plan("set_outlet", category_key, label, bool(include))
+
+    # =========================================================== Phase 9: WhatsApp
+    @staticmethod
+    def _wa(name, *args, edit=True):
+        user = auth.require("superadmin", "admin") if edit else auth.require()
+        from .whatsapp import service as W
+        try:
+            fn = getattr(W, name)
+            out = fn(*args, user=user["username"]) if edit else fn(*args)
+        except W.WAServiceError as e:
+            return {"ok": False, "error": str(e)}
+        return out if isinstance(out, dict) else {"ok": True, "result": out}
+
+    @api_method
+    def wa_state(self):
+        auth.require()
+        from .whatsapp import service as W
+        q = db.conn().execute("SELECT COUNT(*) FROM wa_sends WHERE status IN ('queued','sending')").fetchone()[0]
+        return {"status": wa_status.status(), "worker": W.WORKER.snapshot(), "pending": q,
+                "settings": {k: settings.get("whatsapp." + k) for k in ("url", "headless", "gap_s", "send_timeout_s")}}
+
+    @api_method
+    def wa_link(self):
+        auth.require("superadmin", "admin")
+        from .whatsapp import service as W
+        W.WORKER.link()
+
+    @api_method
+    def wa_unlink(self):
+        user = auth.require("superadmin", "admin")
+        from .whatsapp import service as W
+        W.WORKER.unlink()
+        db.audit(user["username"], "whatsapp.unlink", "")
+
+    @api_method
+    def wa_recipients(self):
+        from .whatsapp import service as W
+        auth.require()
+        return {"recipients": W.recipients(), "routes": W.routes()}
+
+    @api_method
+    def wa_recipient_save(self, data):
+        return self._wa("save_recipient", data)
+
+    @api_method
+    def wa_recipient_delete(self, rid):
+        return self._wa("delete_recipient", rid)
+
+    @api_method
+    def wa_routes_save(self, mapping):
+        return self._wa("save_routes", mapping)
+
+    @api_method
+    def wa_test(self, rid):
+        return self._wa("queue_test", rid)
+
+    @api_method
+    def reports_send(self, ids, fmt="png", caption="{title}"):
+        user = auth.require()
+        from .whatsapp import service as W
+        settings.set("reports.send_format", fmt)
+        settings.set("reports.caption", caption)
+        return W.queue_reports(list(ids or []), fmt, caption, user=user["username"])
+
+    @api_method
+    def wa_batch(self, batch):
+        auth.require()
+        from .whatsapp import service as W
+        return W.batch_status(batch)
+
+    @api_method
+    def wa_cancel(self):
+        user = auth.require()
+        from .whatsapp import service as W
+        return {"cancelled": W.cancel_queued(user["username"])}
+
+    @api_method
+    def wa_history(self, limit=200):
+        auth.require()
+        from .whatsapp import service as W
+        return {"items": W.history(int(limit))}
+
+    @api_method
+    def wa_settings_save(self, data):
+        user = auth.require("superadmin", "admin")
+        url = (data.get("url") or "").strip() or "https://web.whatsapp.com"
+        if not url.startswith(("http://", "https://")):
+            return {"ok": False, "error": "WhatsApp URL must start with https://"}
+        settings.set("whatsapp.url", url)
+        settings.set("whatsapp.headless", bool(data.get("headless", True)))
+        settings.set("whatsapp.gap_s", max(0, min(60, int(data.get("gap_s") or 0))))
+        settings.set("whatsapp.send_timeout_s", max(20, min(600, int(data.get("send_timeout_s") or 90))))
+        db.audit(user["username"], "whatsapp.settings", url)
+
     @api_method
     def territories_list(self):
         auth.require()

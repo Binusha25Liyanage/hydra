@@ -44,6 +44,8 @@ def main() -> int:
     db.init()
     logging_setup.setup(logging.DEBUG if os.environ.get("HYDRA_DEBUG") == "1" else logging.INFO)
     log.info("Hydra %s starting (%s) — data folder %s", version.VERSION, version.PHASE, paths.data_root())
+    from app.whatsapp import service as wa_service
+    wa_service.recover()                         # messages interrupted by the last close -> failed
 
     import webview
 
@@ -64,6 +66,9 @@ def main() -> int:
     window.events.loaded += lambda: winicon.apply_when_ready(ico, settings.get("ui.titlebar"), attempts=3)
     webview.start(debug=os.environ.get("HYDRA_DEBUG") == "1", http_server=True,
                   icon=str(paths.ui_dir() / "assets" / "img" / "hydra_icon.png"))
+    wa_service.WORKER.shutdown()                 # close the WhatsApp browser cleanly
+    if wa_service.WORKER._thread:
+        wa_service.WORKER._thread.join(timeout=5)
     log.info("Hydra closed")
     return 0
 

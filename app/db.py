@@ -269,6 +269,39 @@ MIGRATIONS: list[tuple[int, str]] = [
     );
     CREATE INDEX ix_reports_date ON reports(report_date, report_type);
     """),
+    (5, """
+    -- WhatsApp (Phase 9): who gets what, and every message Hydra sends
+    CREATE TABLE wa_recipients (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL,                 -- group or contact name exactly as WhatsApp shows it
+        kind       TEXT NOT NULL DEFAULT 'group' CHECK (kind IN ('group','contact')),
+        phone      TEXT,                          -- contacts: 94771234567 (opens the chat directly)
+        active     INTEGER NOT NULL DEFAULT 1,
+        notes      TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE wa_routes (
+        report_type  TEXT NOT NULL,
+        recipient_id INTEGER NOT NULL REFERENCES wa_recipients(id) ON DELETE CASCADE,
+        PRIMARY KEY (report_type, recipient_id)
+    );
+    CREATE TABLE wa_sends (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch        TEXT NOT NULL,               -- one Approve & Send press
+        report_id    INTEGER REFERENCES reports(id) ON DELETE SET NULL,
+        recipient_id INTEGER REFERENCES wa_recipients(id) ON DELETE SET NULL,
+        recipient    TEXT NOT NULL,               -- name at the time of sending
+        files_json   TEXT NOT NULL DEFAULT '[]',
+        caption      TEXT,
+        status       TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sending','sent','failed','cancelled')),
+        error        TEXT,
+        created_at   TEXT NOT NULL,
+        sent_at      TEXT,
+        created_by   TEXT
+    );
+    CREATE INDEX ix_wa_sends_batch ON wa_sends(batch);
+    CREATE INDEX ix_wa_sends_status ON wa_sends(status, created_at);
+    """),
 ]
 
 

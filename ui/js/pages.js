@@ -20,7 +20,7 @@
       <div class="cards c5">
         ${card("SFA connection", "server", sfa.logged_in ? "Connected" : (sfa.reachable === false ? "Unreachable" : "Not signed in"),
           sfa.logged_in ? `Signed in${sfa.display_name ? " as " + esc(sfa.display_name) : ""} · ${fmtAgo(sfa.ts)}` : esc(sfa.message || "Checked at every startup"))}
-        ${card("WhatsApp", "message", wa.linked ? "Linked" : "Not linked", wa.linked ? esc(wa.number) : "Linking arrives in Phase 9")}
+        ${card("WhatsApp", "message", wa.linked ? "Linked" : "Not linked", wa.linked ? esc(wa.number) : "Link it on the WhatsApp screen")}
         ${card("Next run", "clock", s.next_run ? fmtTime(s.next_run) : "—", "Scheduler arrives in Phase 10")}
         ${card("Last run", "history", "—", "Report runs arrive in Phase 6")}
         ${card("Data used", "gauge", s.data_today_mb.toFixed(1) + " MB", "Today · meter in Phase 11")}
@@ -255,11 +255,8 @@
 
   // =============================================================== Placeholders
   const PLAN = {
-    calendar: [5, "Calendar & Competition", ["NOWD with manual override", "Competition rounds exactly like the NSM's calendar", "Export the calendar as a PNG"]],
-    aliases: [5, "Aliases & Labels", ["Territory and rep name aliases", "Monthly label overrides", "Excluded test territories"]],
     reconciliation: [7, "Reconciliation", ["Hydra achievement vs SFA Rep Performance per territory", "Tolerance highlight and possible causes"]],
     schedule: [10, "Schedule", ["Run times with Today / Yesterday report date", "Monthly jobs and Activity Report schedule", "Runs while the window is closed"]],
-    whatsapp: [9, "WhatsApp", ["Link by QR inside Hydra", "Recipients per report, test message", "Send history"]],
     activity: [11, "Activity Monitor", ["Run history and data-burning meter", "Activity Reports for any period (Excel / PDF / WhatsApp)", "Health of SFA, WhatsApp, database and disk"]],
   };
   function placeholder(main, page) {
@@ -468,73 +465,6 @@
   }
 
   // =============================================================== Hierarchy & Targets (read-only until the Phase 5 editor)
-  async function targetsPage(main, _p, month) {
-    const r = await call("targets_month", month || "");
-    if (!r.ok) throw new Error(r.error);
-    const LV = ["National", "Region", "RSM", "ASM", "DTM", "ASE", "Territory"];
-    if (!r.month) {
-      main.innerHTML = `${head("Targets", "Hierarchy & Targets", "", targetsButtons())}<div class="card"><div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No targets yet</h3>
-        Import a Target vs Achievement Excel with <b>Import targets…</b>, or import from Famulus on the <a href="#" id="tgo">SFA Data</a> screen.</div></div>`;
-      $("#tgo").onclick = (e) => { e.preventDefault(); App.go("data"); };
-      bindTargets(main, _p, null);
-      return;
-    }
-    const m = r.month, nat = r.tree[0] || { gt: 0, smmt: 0 };
-    const rows = [];
-    (function walk(n, depth) {
-      rows.push({ n, depth });
-      n.children.forEach((k) => walk(k, depth + 1));
-    })(r.tree[0] || { children: [] }, 0);
-    const ml = (s) => new Date(s + "-01").toLocaleString("en-GB", { month: "long", year: "numeric" });
-    main.innerHTML = `${head("Targets", "Hierarchy & Targets", `Monthly hierarchy and targets used by every report. Import them from a Target vs Achievement Excel or Famulus; the full editor arrives in Phase 5.`,
-        `<select class="input select" id="tmonth" style="width:180px">${r.months.map((x) => `<option value="${x}" ${x === m.month ? "selected" : ""}>${ml(x)}</option>`).join("")}</select>` + targetsButtons())}
-      <div class="cards c4" style="margin-bottom:16px">
-        <div class="card stat"><div class="k">${icon("tree")}National target</div><div class="v">${money(nat.gt + nat.smmt)}</div><div class="s">GT ${money(nat.gt)} · SMMT ${money(nat.smmt)}</div></div>
-        <div class="card stat"><div class="k">${icon("calendar")}Working days (NOWD)</div><div class="row"><div class="v">${m.nowd ?? "—"}</div><span class="spacer"></span>${canEditTargets() ? `<button class="btn btn-ghost btn-sm" id="tnowd">${icon("settings")}Set</button>` : ""}</div><div class="s">${m.nowd ? (m.nowd_manual ? "Set manually" : "From calendar") : "Not set — the Day Report needs it"}</div></div>
-        <div class="card stat"><div class="k">${icon("map")}Territories</div><div class="v">${rows.filter((x) => x.n.level === 6).length}</div><div class="s">${rows.filter((x) => x.n.level === 6 && x.n.is_operating === 0).length} vacant · ${rows.filter((x) => x.n.flagged_red).length} flagged red</div></div>
-        <div class="card stat"><div class="k">${icon("file")}Source</div><div class="v" style="font-size:16px">${esc(m.source || "—")}</div><div class="s" title="${esc(m.source_file || "")}">${esc(m.source_file || "")}</div></div></div>
-      <div class="card"><div class="card-b"><div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Hierarchy</th><th>Level</th><th class="num">GT target</th><th class="num">SMMT target</th><th>Distributor</th><th>CSR</th></tr></thead><tbody>
-        ${rows.map(({ n, depth }) => { const terr = n.level === 6;
-          return `<tr style="${terr ? "" : "background:rgba(179,23,47,.07)"}"><td style="padding-left:${12 + depth * 18}px;${terr ? "" : "font-weight:600"};${n.flagged_red ? "color:var(--err)" : ""}">${esc(n.label)}${n.is_smmt && terr ? ` <span class="chip cherry" style="height:18px">SMMT</span>` : ""}${terr && n.is_operating === 0 ? ` <span class="chip warn" style="height:18px">Vacant</span>` : ""}</td>
-            <td class="faint">${LV[n.level]}</td><td class="num">${n.gt ? money(n.gt) : "—"}</td><td class="num">${n.smmt ? money(n.smmt) : "—"}</td>
-            <td class="muted">${terr ? esc(n.distributor || "") : ""}</td><td class="muted">${terr ? esc(n.csr || "") : ""}</td></tr>`; }).join("")}
-      </tbody></table></div></div></div>`;
-    $("#tmonth").onchange = (e) => targetsPage(main, _p, e.target.value).then(() => Hydra.hydrateIcons(main));
-    bindTargets(main, _p, m.month);
-  }
-
-  const canEditTargets = () => App.user && App.user.role !== "user";
-  function targetsButtons() {
-    return canEditTargets() ? `<button class="btn btn-primary" id="timport">${icon("download")}Import targets…</button>` : "";
-  }
-  function bindTargets(main, _p, month) {
-    const reload = (mm) => targetsPage(main, _p, mm).then(() => Hydra.hydrateIcons(main));
-    if ($("#tnowd")) $("#tnowd").onclick = async () => {
-      const v = await modal({ title: "Working days (NOWD)", body: `<div class="field"><label>Working days in ${esc(month)}</label><input class="input" type="number" min="1" max="31" id="nw" value="${esc($("#tnowd").closest(".stat").querySelector(".v").textContent.replace("—", ""))}">
-          <div class="hint">From the NSM's competition calendar (e.g. November 2026 = 24: 30 days − 5 Sundays − Poya).</div></div>`,
-        buttons: [{ label: "Cancel", value: null }, { label: "Save", cls: "btn-primary", value: (mm) => $("#nw", mm).value }] });
-      if (!v) return;
-      const r = await call("targets_set_nowd", month, v);
-      r.ok ? (toast("success", "NOWD saved"), reload(month)) : toast("error", "Not saved", r.error);
-    };
-    if ($("#timport")) $("#timport").onclick = async () => {
-      const pick = await call("targets_choose_file");
-      if (!pick.ok || !pick.path) return;
-      const f = await call("targets_inspect", pick.path);
-      if (!f.ok) return toast("error", "Cannot read targets", f.error);
-      const v = await modal({ title: "Import targets", body: `<div class="stack">
-          <div><b>${esc(f.file_name)}</b></div>
-          <div class="row wrap" style="gap:18px"><span><span class="faint">Territories</span> <b>${f.territories}</b></span><span><span class="faint">GT</span> <b>${money(f.gt_total)}</b></span><span><span class="faint">SMMT</span> <b>${money(f.smmt_total)}</b></span><span><span class="faint">National</span> <b>${money(f.total)}</b></span></div>
-          ${f.warnings.length ? `<div class="alert warn">${icon("warn")}<div>${f.warnings.map(esc).join("<br>")}</div></div>` : `<div class="alert ok">${icon("okcircle")}<div>Every subtotal adds up.</div></div>`}
-          <div class="field"><label>Targets are for month</label><input class="input" type="month" id="tm" value="${esc(f.month || "")}"></div>
-          ${f.exists ? `<label class="check"><input type="checkbox" id="tov"> Replace the targets already saved for this month</label>` : ""}</div>`,
-        buttons: [{ label: "Cancel", value: null }, { label: "Import", cls: "btn-primary", value: (mm) => ({ month: $("#tm", mm).value, over: $("#tov", mm) ? $("#tov", mm).checked : false }) }] });
-      if (!v) return;
-      const r = await call("targets_import", pick.path, v.month, v.over);
-      r.ok ? (toast("success", `Targets imported for ${v.month}`, `${r.territories} territories`), reload(v.month)) : toast("error", "Not imported", r.error);
-    };
-  }
-
   // =============================================================== Run Center
   async function runCenter(main, page, opts) {
     const types = (await call("reports_types")).types;
@@ -621,8 +551,11 @@
     const r = await call("reports_get", ids);
     if (!r.ok || !r.reports.length) return toast("error", "Nothing to preview", r.error || "");
     const reps = r.reports;
-    const st = await call("settings_get");
+    const [st, wa, rc] = await Promise.all([call("settings_get"), call("wa_state"), call("wa_recipients")]);
     const cfg = (st.ok && st.settings) || {};
+    const linked = !!(wa.ok && wa.status.linked);
+    const recNames = Object.fromEntries(((rc.ok && rc.recipients) || []).filter((x) => x.active).map((x) => [x.id, x.name]));
+    const routesOf = (t) => (((rc.ok && rc.routes) || {})[t] || []).filter((id) => recNames[id]).map((id) => recNames[id]);
     let cur = reps[0].id, page = 0, fmt = cfg["reports.send_format"] || "png";
     const chosen = new Set(reps.filter((x) => x.status !== "failed").map((x) => x.id));
     const back = document.createElement("div");
@@ -636,11 +569,13 @@
               <input type="checkbox" class="pvchk" value="${x.id}" ${chosen.has(x.id) ? "checked" : ""}>
               <div class="pv-thumb" id="th${x.id}"><span class="spinner"></span></div>
               <div class="pv-meta"><b>${esc(x.name)}</b><small class="faint">${x.pages ? x.pages + " image" + (x.pages > 1 ? "s" : "") : "No images"}${x.has_pdf ? " · PDF" : ""}</small>
-                <span class="chip ${statusCls(x.status)}">${esc(x.status)}</span>${(x.warnings || []).length ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</div></div>`).join("")}</div>
+                <small class="pv-to ${routesOf(x.report_type).length ? "" : "none"}">${routesOf(x.report_type).length ? "→ " + esc(routesOf(x.report_type).join(", ")) : "No WhatsApp recipients"}</small>
+                <span class="chip ${statusCls(x.status)}" data-st="${x.id}">${esc(x.status)}</span>${(x.warnings || []).length ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</div></div>`).join("")}</div>
           <div class="pv-opts stack">
             <div class="field"><label>Send as</label><div class="seg" id="pvfmt">${["png", "pdf", "both"].map((f) => `<button data-f="${f}" class="${f === fmt ? "on" : ""}">${{ png: "Images", pdf: "PDF", both: "Both" }[f]}</button>`).join("")}</div></div>
             <div class="field"><label>Caption</label><textarea class="input" id="pvcap" rows="2"></textarea><small class="faint">{title} and {date} are filled in for each report.</small></div>
-            <div class="alert info">${icon("message")}<div><b>Recipients</b>WhatsApp groups and contacts are set up in Phase 9. Until then, Approve marks the reports as ready to send.</div></div>
+            ${linked ? `<div class="alert info">${icon("message")}<div><b>Sends from ${esc(wa.status.number || "the linked WhatsApp")}</b>Each report goes to the recipients shown under it. Change them on the <a href="#" class="pvwa">WhatsApp screen</a>.</div></div>`
+              : `<div class="alert warn">${icon("warn")}<div><b>WhatsApp is not linked</b>Approve will mark the reports as approved only. <a href="#" class="pvwa">Link WhatsApp</a> to send them.</div></div>`}
           </div>
         </div>
         <div class="pv-view">
@@ -653,7 +588,7 @@
         <button class="btn btn-secondary" id="pvref" title="Generate these reports again with the latest data">${icon("refresh")}Refresh</button>
         <span class="spacer"></span>
         <button class="btn btn-secondary" id="pvsave" title="Keep the files in the output folder without sending">${icon("download")}Save</button>
-        <button class="btn btn-primary" id="pvok">${icon("send")}Approve &amp; Send</button>
+        <button class="btn btn-primary" id="pvok">${icon("send")}${linked ? "Approve &amp; Send" : "Approve"}</button>
       </div></div>`;
     document.body.appendChild(back);
     Hydra.hydrateIcons(back);
@@ -720,7 +655,52 @@
       if (location.hash === "#reports") App.go("reports");
     }
     q("#pvsave").onclick = () => mark("saved", "Saved to the output folder");
-    q("#pvok").onclick = () => mark("approved", "Approved — WhatsApp sending arrives in Phase 9");
+    back.querySelectorAll(".pvwa").forEach((a) => a.onclick = (e) => { e.preventDefault(); close(); App.go("whatsapp"); });
+    q("#pvok").onclick = async () => {
+      if (!linked) return mark("approved", "Approved — link WhatsApp to send");
+      const ids = [...chosen];
+      const noTo = reps.filter((x) => chosen.has(x.id) && !routesOf(x.report_type).length).map((x) => x.name);
+      if (noTo.length === ids.length) return toast("warning", "No recipients", "Choose who gets these reports on the WhatsApp screen first.");
+      const r2 = await call("reports_send", ids, fmt, q("#pvcap").value);
+      if (!r2.ok) return toast("error", "Not sent", r2.error);
+      if (r2.skipped.length) toast("warning", "Not sent — no recipients", r2.skipped.join(", "));
+      sending(r2.batch, r2.queued);
+    };
+    function sending(batch, total) {
+      back.querySelectorAll(".pvchk, #pvall, #pvfmt button, #pvcap").forEach((el) => el.disabled = true);
+      const f = q(".modal-f");
+      f.innerHTML = `<div class="pv-prog"><div class="row"><span class="spinner" id="pvspin"></span><b id="pvptxt">Sending 0 of ${total}…</b><span class="spacer"></span><span class="faint" id="pvpsub"></span></div><div class="bar"><i id="pvbar"></i></div></div>
+        <button class="btn btn-dark btn-stop" id="pvcancel">${icon("stop")}Cancel</button><button class="btn btn-primary hidden" id="pvdone">Close</button>`;
+      Hydra.hydrateIcons(f);
+      q("#pvcancel").onclick = async () => { await call("wa_cancel"); q("#pvpsub").textContent = "Cancelling after the current message…"; };
+      q("#pvdone").onclick = () => { close(); if (location.hash === "#reports") App.go("reports"); };
+      const t = setInterval(async () => {
+        if (!document.body.contains(back)) return clearInterval(t);
+        const b = await call("wa_batch", batch);
+        if (!b.ok) return;
+        const c = b.counts, done = c.sent + c.failed + c.cancelled;
+        q("#pvbar").style.width = (100 * done / Math.max(total, 1)) + "%";
+        q("#pvptxt").textContent = b.done ? `${c.sent} of ${total} sent` + (c.failed ? ` · ${c.failed} failed` : "") + (c.cancelled ? ` · ${c.cancelled} cancelled` : "") : `Sending ${done + 1} of ${total}…`;
+        q("#pvpsub").textContent = b.done ? "" : (b.worker.message || "");
+        const per = {};
+        b.items.forEach((it) => { (per[it.report_id] = per[it.report_id] || []).push(it.status); });
+        Object.entries(per).forEach(([rid, sts]) => {
+          const chip = back.querySelector(`[data-st="${rid}"]`); if (!chip) return;
+          const st2 = sts.every((x) => x === "sent") ? "sent" : sts.some((x) => x === "failed") ? "failed" : sts.some((x) => x === "sending") ? "sending" : "approved";
+          chip.textContent = st2; chip.className = "chip " + (st2 === "sent" ? "ok" : st2 === "failed" ? "err" : "warn");
+          const fail = b.items.find((it) => it.report_id === +rid && it.error && it.status === "failed");
+          if (fail) chip.title = fail.error;
+        });
+        if (b.done) {
+          clearInterval(t);
+          q("#pvspin").remove(); q("#pvcancel").classList.add("hidden"); q("#pvdone").classList.remove("hidden");
+          q("#pvbar").classList.toggle("bad", c.failed > 0);
+          const fails = b.items.filter((it) => it.status === "failed");
+          if (fails.length) q("#pvpsub").textContent = fails[0].recipient + ": " + fails[0].error;
+          toast(c.failed ? "warning" : "success", c.failed ? "Some messages failed" : "Reports sent on WhatsApp", `${c.sent} sent` + (c.failed ? `, ${c.failed} failed` : ""));
+        }
+      }, 1000);
+    }
     counter();
     show();
     // thumbnails (first image of each report)
@@ -761,6 +741,7 @@
     await load();
   }
 
-  window.Pages = { previewSend, run: runCenter, reports: reportsHistory, targets: targetsPage, dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues, data: dataPage, territories: territoriesPage };
+  window.Pages = { previewSend, run: runCenter, reports: reportsHistory, dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues, data: dataPage, territories: territoriesPage };
   Object.keys(PLAN).forEach((k) => window.Pages[k] = placeholder);
+  window.Pages.util = { head, money, statusCls };
 })();
