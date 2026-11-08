@@ -255,10 +255,6 @@
 
   // =============================================================== Placeholders
   const PLAN = {
-    run: [6, "Run Center", ["Report date picker and report checkboxes", "Live step list with time and MB per step", "Stop and Retry failed step", "Live log with Copy Log"]],
-    reports: [6, "Reports History", ["Every generated report with status (Generated / Approved / Sent / Saved / Failed)", "Open Excel / PDF / PNG, Resend, Open folder"]],
-    territories: [3, "Territories", ["Active territory database synced from View Territory", "Van / Pre selling mode per territory", "Changes after each sync"]],
-    targets: [5, "Hierarchy & Targets", ["Import the NSM target workbook or Famulus", "Tree + spreadsheet editor, Lock month, audit history", "Validation against active SFA territories"]],
     calendar: [5, "Calendar & Competition", ["NOWD with manual override", "Competition rounds exactly like the NSM's calendar", "Export the calendar as a PNG"]],
     aliases: [5, "Aliases & Labels", ["Territory and rep name aliases", "Monthly label overrides", "Excluded test territories"]],
     reconciliation: [7, "Reconciliation", ["Hydra achievement vs SFA Rep Performance per territory", "Tolerance highlight and possible causes"]],
@@ -297,6 +293,315 @@
       </div>`;
   }
 
-  window.Pages = { dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues };
+  // =============================================================== SFA Data (imports)
+  const KIND = { sku: ["SKU Sales", "file"], callage: ["Callage", "activity"], sales_order: ["Pre-Selling Orders", "history"], rep_performance: ["Rep Performance", "users"] };
+  const money = (n) => (n == null ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 }));
+
+  async function dataPage(main) {
+    const canDelete = App.user && App.user.role !== "user";
+    main.innerHTML = `${head("SFA data", "SFA Data", "Every SFA Excel file Hydra has read. Numbers stored as text are converted, the totals row is removed and checked against SFA's own total. From Phase 2 Hydra downloads these automatically; until then you can import files you downloaded yourself.",
+        `${canDelete ? `<button class="btn btn-secondary btn-lg" id="dfam">${icon("database")}Import from Famulus…</button>` : ""}<button class="btn btn-primary btn-lg" id="dimport">${icon("download")}Import SFA Excel files…</button>`)}
+      <div id="dinspect"></div>
+      <div class="cards c4" id="dcov" style="margin-bottom:16px"></div>
+      <div class="card"><div class="card-h">${icon("database")}<h3>Import history</h3><span class="spacer"></span>
+        <div class="seg" id="dseg"><button data-k="" class="on">All</button>${Object.entries(KIND).map(([k, [l]]) => `<button data-k="${k}">${l}</button>`).join("")}</div></div>
+        <div class="card-b" id="dlist"><span class="spinner"></span></div></div>`;
+    let kind = "";
+    async function load() {
+      const r = await call("data_imports", kind);
+      if (!r.ok) throw new Error(r.error);
+      const today = new Date();
+      const days = [...Array(14)].map((_, i) => { const d = new Date(today); d.setDate(d.getDate() - 13 + i); return d.toISOString().slice(0, 10); });
+      $("#dcov").innerHTML = r.coverage.map((c) => {
+        const have = new Set(c.days.map((d) => d.date));
+        const strip = c.kind === "rep_performance" ? `<div class="faint">${c.days.length ? esc(c.days[0].date) : "No periods yet"}</div>`
+          : `<div class="row" style="gap:3px">${days.map((d) => `<span title="${d}${have.has(d) ? " · data" : " · no data"}" style="width:12px;height:22px;border-radius:2px;background:${have.has(d) ? "var(--cherry-400)" : "var(--black-650)"}"></span>`).join("")}</div>`;
+        return `<div class="card stat"><div class="k">${icon(KIND[c.kind][1])}${esc(KIND[c.kind][0])}</div>${strip}
+          <div class="s">${c.last_import ? "Last import " + fmtAgo(c.last_import) : "Nothing imported yet"}</div></div>`;
+      }).join("");
+      $("#dlist").innerHTML = r.imports.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Type</th><th>File</th><th>Period</th><th class="num">Rows</th><th class="num">Check total</th><th>Imported</th><th>Status</th><th></th></tr></thead><tbody>
+        ${r.imports.map((i) => {
+          const chk = i.file_total == null ? `<span class="faint" title="SFA printed no totals row">${money(i.check_total)}</span>`
+            : `<span title="SFA total ${money(i.file_total)}">${money(i.check_total)} ${Math.abs(i.check_total - i.file_total) < 0.01 ? `<span class="chip ok" style="height:20px">✓</span>` : `<span class="chip err" style="height:20px">≠</span>`}</span>`;
+          return `<tr><td class="mono faint">${i.id}</td><td><span class="chip">${esc(KIND[i.kind] ? KIND[i.kind][0] : i.kind)}</span></td>
+            <td title="${esc(i.file_name)}" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.file_name)}</td>
+            <td class="mono">${esc(i.period_from || "—")}${i.period_to && i.period_to !== i.period_from ? " → " + esc(i.period_to) : ""}</td>
+            <td class="num">${i.rows.toLocaleString()}</td><td class="num">${chk}</td>
+            <td class="faint">${fmtTime(i.imported_at)}<br>${esc(i.source)} · ${esc(i.imported_by || "")}</td>
+            <td>${i.status === "active" ? `<span class="chip ok">Active</span>` : `<span class="chip">Replaced</span>`}${i.warnings.length ? ` <span class="chip warn" title="${esc(i.warnings.join("\n"))}">${icon("warn")}${i.warnings.length}</span>` : ""}</td>
+            <td>${canDelete ? `<button class="btn btn-ghost btn-sm" data-del="${i.id}">Delete</button>` : ""}</td></tr>`; }).join("")}
+        </tbody></table></div>` : `<div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No SFA data yet</h3>Import an Outlet Wise SKU, Callage, Sales Order or Rep Performance Excel to start.</div>`;
+      $$("[data-del]").forEach((b) => b.onclick = async () => {
+        const ok = await modal({ title: "Delete import", body: `<p>Delete import #${b.dataset.del} and all its rows? Reports for those dates will have no data until it is imported again.</p>`,
+          buttons: [{ label: "Cancel", value: false }, { label: "Delete", cls: "btn-primary", value: true }] });
+        if (!ok) return;
+        const d = await call("data_delete", b.dataset.del);
+        d.ok ? (toast("success", "Import deleted"), load()) : toast("error", "Not deleted", d.error);
+      });
+    }
+    $$("#dseg button").forEach((b) => b.onclick = () => { $$("#dseg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); kind = b.dataset.k; load(); });
+
+    $("#dimport").onclick = async () => {
+      const pick = await call("data_choose_files");
+      if (!pick.ok || !pick.paths.length) return;
+      busy($("#dimport"), true, "Reading files…");
+      const r = await call("data_inspect", pick.paths);
+      busy($("#dimport"), false);
+      if (!r.ok) return toast("error", "Could not read files", r.error);
+      showInspection(r.files);
+    };
+
+    if ($("#dfam")) $("#dfam").onclick = async () => {
+      const pick = await call("famulus_choose");
+      if (!pick.ok || !pick.path) return;
+      busy($("#dfam"), true, "Reading Famulus…");
+      const f = await call("famulus_inspect", pick.path);
+      busy($("#dfam"), false);
+      if (!f.ok) return toast("error", "Cannot read this file", f.error);
+      const range = (d) => d && d.count ? `${d.count} days · ${esc(d.first)} → ${esc(d.last)}${d.already_in_hydra.length ? ` <span class="chip warn">${d.already_in_hydra.length} already in Hydra</span>` : ""}` : "none";
+      const part = (k, title, detail, on = true) => `<label class="toggle-row" style="margin-bottom:8px"><div class="t"><b>${title}</b><small>${detail}</small></div><input type="checkbox" class="fpart" value="${k}" ${on ? "checked" : ""} style="width:18px;height:18px;accent-color:var(--cherry-500)"></label>`;
+      const body = `<div class="stack" style="gap:0">
+        ${part("targets", "Targets &amp; hierarchy", f.months.map((m) => `${m.month}: ${m.territories} territories · ${money(m.total)}${m.exists ? " (already in Hydra)" : ""}`).join("<br>") || "none")}
+        ${part("nowd", "Working days (NOWD)", f.months.map((m) => `${m.month}: ${m.nowd ?? "—"}`).join(" · "))}
+        ${part("sales", "Daily SKU sales history", range(f.sales) + (f.sales.total_value ? ` · ${money(f.sales.total_value)}` : ""))}
+        ${part("callage", "Prepared daily callage", range(f.callage))}
+        ${f.pending ? part("pending", "Pending pre-selling orders", range(f.pending)) : ""}
+        ${part("modes", "Van / Pre selling modes", `${f.modes} territories`)}
+        ${part("outlets", "Outlet categories (competition eligibility)", `${f.outlets} categories`)}
+        ${f.competition ? part("competition", "Competition limits", `Van ${money(f.competition.van_sale_limit)} / ${f.competition.van_bill_limit} bills · Pre ${money(f.competition.pre_sale_limit)} / ${f.competition.pre_bill_limit} bills · ${esc(f.competition.start_date)} → ${esc(f.competition.end_date)}`) : ""}
+        <label class="check" style="margin-top:10px"><input type="checkbox" id="fover"> Overwrite days / months Hydra already has</label>
+        <div class="faint" style="margin-top:8px">Famulus is only read, never changed. Its users and licence are not copied.</div></div>`;
+      const go = await modal({ title: "Import from Famulus", body, buttons: [{ label: "Cancel", value: null },
+        { label: "Import", cls: "btn-primary", value: (m) => ({ parts: $$(".fpart", m).filter((x) => x.checked).map((x) => x.value), over: $("#fover", m).checked }) }] });
+      if (!go || !go.parts.length) return;
+      busy($("#dfam"), true, "Importing…");
+      const r = await call("famulus_import", pick.path, go.parts, go.over);
+      busy($("#dfam"), false);
+      if (!r.ok) return toast("error", "Famulus import failed", r.error);
+      await modal({ title: "Famulus import finished", body: `<table class="table"><tbody>${Object.entries(r.report).map(([k, v]) => `<tr><td class="faint" style="width:120px">${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</tbody></table>` });
+      load(); App.refreshStatus();
+    };
+
+    function showInspection(files) {
+      const box = $("#dinspect");
+      box.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="card-h">${icon("search")}<h3>Check before importing</h3><span class="spacer"></span>
+          <button class="btn btn-ghost btn-sm" id="dcancel">Cancel</button><button class="btn btn-primary" id="dgo">${icon("download")}Import selected</button></div>
+        <div class="card-b stack">${files.map((f, i) => {
+          if (!f.ok) return `<div class="alert err">${icon("error")}<div><b>${esc(f.file_name)}</b>${esc(f.error)}</div></div>`;
+          const blocked = f.errors.length || f.duplicate;
+          const v = f.verification;
+          const ver = v.ok === true ? `<span class="chip ok">${icon("check")}Matches SFA total</span>` : v.ok === false ? `<span class="chip err">${icon("warn")}Does not match SFA total</span>` : `<span class="chip">No totals row to check</span>`;
+          return `<div class="panel" data-i="${i}"><div class="row wrap">
+              <label class="check"><input type="checkbox" class="dsel" ${blocked ? "disabled" : "checked"}></label>
+              <span class="chip cherry">${esc(KIND[f.kind][0])}</span><b>${esc(f.file_name)}</b>
+              <span class="mono faint">${esc(f.period_from || "")}${f.period_to && f.period_to !== f.period_from ? " → " + esc(f.period_to) : ""}</span>
+              <span class="spacer"></span>${ver}</div>
+            <div class="row wrap" style="margin-top:8px;gap:18px">
+              <span><span class="faint">Rows</span> <b>${f.rows.toLocaleString()}</b></span><span><span class="faint">Territories</span> <b>${f.territories}</b></span>
+              ${Object.entries(f.totals).map(([k, n]) => `<span><span class="faint">${esc(k)}</span> <b>${money(n)}</b></span>`).join("")}
+              ${f.converted_cells ? `<span class="faint">${f.converted_cells.toLocaleString()} numbers converted from text</span>` : ""}</div>
+            ${f.errors.map((e) => `<div class="alert err" style="margin-top:8px">${icon("error")}<div>${esc(e)}</div></div>`).join("")}
+            ${f.duplicate ? `<div class="alert info" style="margin-top:8px">${icon("info")}<div>Already imported as #${f.duplicate.id} on ${fmtTime(f.duplicate.imported_at)} — skipped.</div></div>` : ""}
+            ${f.warnings.map((w) => `<div class="alert warn" style="margin-top:8px">${icon("warn")}<div>${esc(w)}</div></div>`).join("")}
+            ${!f.duplicate && f.conflicts.length ? `<div class="alert warn" style="margin-top:8px">${icon("warn")}<div><b>Data for ${esc([...new Set(f.conflicts.flatMap((c) => c.dates))].join(", "))} already exists</b>
+              from ${f.conflicts.map((c) => `#${c.import_id} ${esc(c.file_name)}`).join(", ")}.
+              <label class="check" style="margin-top:6px"><input type="checkbox" class="drep"> Replace the existing data with this file</label></div></div>` : ""}
+          </div>`; }).join("")}</div></div>`;
+      $("#dcancel").onclick = () => box.innerHTML = "";
+      $("#dgo").onclick = async () => {
+        const items = [];
+        $$(".panel[data-i]", box).forEach((p) => {
+          const f = files[+p.dataset.i], sel = $(".dsel", p), rp = $(".drep", p);
+          if (!sel || !sel.checked) return;
+          if (f.conflicts.length && !(rp && rp.checked)) return toast("warning", "Not imported: " + f.file_name, "Tick “Replace” to overwrite the existing dates.");
+          items.push({ path: f.path, replace: !!(rp && rp.checked) });
+        });
+        if (!items.length) return;
+        busy($("#dgo"), true, "Importing…");
+        const r = await call("data_import", items);
+        busy($("#dgo"), false);
+        if (!r.ok) return toast("error", "Import failed", r.error);
+        r.results.forEach((x) => x.ok ? toast("success", `Imported ${x.file_name}`, `${x.rows.toLocaleString()} rows${x.replaced ? " · replaced earlier data" : ""}`) : toast("error", x.file_name, x.error));
+        box.innerHTML = ""; load(); App.refreshStatus();
+      };
+    }
+    await load();
+  }
+
+  // =============================================================== Territories
+  async function territoriesPage(main) {
+    const canEdit = App.user && App.user.role !== "user";
+    main.innerHTML = `${head("Territory master", "Territories", "Every territory found in SFA data. Van / Pre selling decides how Callage is prepared: Van territories use the report day, Pre territories use the previous working day.")}
+      <div class="row wrap" style="margin-bottom:12px">
+        <div class="input-wrap" style="width:300px">${icon("search")}<input class="input" id="tsearch" placeholder="Search territories…"></div>
+        <div class="seg" id="tseg"><button data-f="" class="on">All</button><button data-f="van">Van</button><button data-f="pre">Pre</button><button data-f="none">Not set</button><button data-f="smmt">SMMT</button></div>
+        <span class="spacer"></span><span class="faint" id="tcount"></span></div>
+      <div class="alert info" style="margin-bottom:12px">${icon("info")}<div>Selling mode is filled in automatically from the SKU report's <b style="display:inline">SALES REP MODEL</b> column. A territory with no sales yet (e.g. a Pre territory whose orders are not invoiced) stays “Not set” — choose it by hand; manual choices are never overwritten. Full sync from View Territory comes with the Phase 2 downloads.</div></div>
+      <div class="card"><div class="card-b" id="tlist"><span class="spinner"></span></div></div>`;
+    let all = [], filter = "";
+    const r = await call("territories_list");
+    if (!r.ok) throw new Error(r.error);
+    all = r.territories;
+    function draw() {
+      const q = $("#tsearch").value.toLowerCase();
+      const rows = all.filter((t) => (!q || t.name.toLowerCase().includes(q)) &&
+        (!filter || (filter === "none" ? !t.selling_mode : filter === "smmt" ? t.is_smmt : t.selling_mode === filter)));
+      $("#tcount").textContent = `${rows.length} of ${all.length} · ${all.filter((t) => t.selling_mode === "pre").length} Pre · ${all.filter((t) => t.selling_mode === "van").length} Van · ${all.filter((t) => !t.selling_mode).length} not set`;
+      $("#tlist").innerHTML = all.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Territory</th><th>Selling mode</th><th>Set by</th><th>Type</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>
+        ${rows.map((t) => `<tr data-n="${esc(t.name)}"><td><b>${esc(t.name)}</b></td>
+          <td><div class="seg">${["van", "pre"].map((m) => `<button data-m="${m}" class="${t.selling_mode === m ? "on" : ""}" ${canEdit ? "" : "disabled"}>${m === "van" ? "Van Selling" : "Pre Selling"}</button>`).join("")}</div></td>
+          <td>${t.mode_source ? `<span class="chip ${t.mode_source === "manual" ? "info" : ""}">${esc(t.mode_source)}</span>` : `<span class="chip warn">Not set</span>`}</td>
+          <td>${t.is_smmt ? `<span class="chip cherry">SMMT</span>` : `<span class="faint">GT</span>`}</td>
+          <td class="mono faint">${esc(t.first_seen)}</td><td class="mono faint">${esc(t.last_seen)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No territories yet</h3>Import an SFA file on the SFA Data screen — territories are added automatically.</div>`;
+      $$("#tlist tr[data-n] [data-m]").forEach((b) => b.onclick = async () => {
+        const name = b.closest("tr").dataset.n, t = all.find((x) => x.name === name);
+        const res = await call("territory_set_mode", name, b.dataset.m);
+        if (!res.ok) return toast("error", "Not saved", res.error);
+        t.selling_mode = b.dataset.m; t.mode_source = "manual"; draw();
+        toast("success", `${name}: ${b.dataset.m === "van" ? "Van" : "Pre"} Selling`);
+      });
+    }
+    $("#tsearch").oninput = draw;
+    $$("#tseg button").forEach((b) => b.onclick = () => { $$("#tseg button").forEach((x) => x.classList.remove("on")); b.classList.add("on"); filter = b.dataset.f; draw(); });
+    draw();
+  }
+
+  // =============================================================== Hierarchy & Targets (read-only until the Phase 5 editor)
+  async function targetsPage(main, _p, month) {
+    const r = await call("targets_month", month || "");
+    if (!r.ok) throw new Error(r.error);
+    const LV = ["National", "Region", "RSM", "ASM", "DTM", "ASE", "Territory"];
+    if (!r.month) {
+      main.innerHTML = `${head("Targets", "Hierarchy & Targets", "", targetsButtons())}<div class="card"><div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No targets yet</h3>
+        Import a Target vs Achievement Excel with <b>Import targets…</b>, or import from Famulus on the <a href="#" id="tgo">SFA Data</a> screen.</div></div>`;
+      $("#tgo").onclick = (e) => { e.preventDefault(); App.go("data"); };
+      bindTargets(main, _p, null);
+      return;
+    }
+    const m = r.month, nat = r.tree[0] || { gt: 0, smmt: 0 };
+    const rows = [];
+    (function walk(n, depth) {
+      rows.push({ n, depth });
+      n.children.forEach((k) => walk(k, depth + 1));
+    })(r.tree[0] || { children: [] }, 0);
+    const ml = (s) => new Date(s + "-01").toLocaleString("en-GB", { month: "long", year: "numeric" });
+    main.innerHTML = `${head("Targets", "Hierarchy & Targets", `Monthly hierarchy and targets used by every report. Import them from a Target vs Achievement Excel or Famulus; the full editor arrives in Phase 5.`,
+        `<select class="input select" id="tmonth" style="width:180px">${r.months.map((x) => `<option value="${x}" ${x === m.month ? "selected" : ""}>${ml(x)}</option>`).join("")}</select>` + targetsButtons())}
+      <div class="cards c4" style="margin-bottom:16px">
+        <div class="card stat"><div class="k">${icon("tree")}National target</div><div class="v">${money(nat.gt + nat.smmt)}</div><div class="s">GT ${money(nat.gt)} · SMMT ${money(nat.smmt)}</div></div>
+        <div class="card stat"><div class="k">${icon("calendar")}Working days (NOWD)</div><div class="row"><div class="v">${m.nowd ?? "—"}</div><span class="spacer"></span>${canEditTargets() ? `<button class="btn btn-ghost btn-sm" id="tnowd">${icon("settings")}Set</button>` : ""}</div><div class="s">${m.nowd ? (m.nowd_manual ? "Set manually" : "From calendar") : "Not set — the Day Report needs it"}</div></div>
+        <div class="card stat"><div class="k">${icon("map")}Territories</div><div class="v">${rows.filter((x) => x.n.level === 6).length}</div><div class="s">${rows.filter((x) => x.n.level === 6 && x.n.is_operating === 0).length} vacant · ${rows.filter((x) => x.n.flagged_red).length} flagged red</div></div>
+        <div class="card stat"><div class="k">${icon("file")}Source</div><div class="v" style="font-size:16px">${esc(m.source || "—")}</div><div class="s" title="${esc(m.source_file || "")}">${esc(m.source_file || "")}</div></div></div>
+      <div class="card"><div class="card-b"><div class="table-wrap" style="max-height:calc(100vh - 360px)"><table class="table"><thead><tr><th>Hierarchy</th><th>Level</th><th class="num">GT target</th><th class="num">SMMT target</th><th>Distributor</th><th>CSR</th></tr></thead><tbody>
+        ${rows.map(({ n, depth }) => { const terr = n.level === 6;
+          return `<tr style="${terr ? "" : "background:rgba(179,23,47,.07)"}"><td style="padding-left:${12 + depth * 18}px;${terr ? "" : "font-weight:600"};${n.flagged_red ? "color:var(--err)" : ""}">${esc(n.label)}${n.is_smmt && terr ? ` <span class="chip cherry" style="height:18px">SMMT</span>` : ""}${terr && n.is_operating === 0 ? ` <span class="chip warn" style="height:18px">Vacant</span>` : ""}</td>
+            <td class="faint">${LV[n.level]}</td><td class="num">${n.gt ? money(n.gt) : "—"}</td><td class="num">${n.smmt ? money(n.smmt) : "—"}</td>
+            <td class="muted">${terr ? esc(n.distributor || "") : ""}</td><td class="muted">${terr ? esc(n.csr || "") : ""}</td></tr>`; }).join("")}
+      </tbody></table></div></div></div>`;
+    $("#tmonth").onchange = (e) => targetsPage(main, _p, e.target.value).then(() => Hydra.hydrateIcons(main));
+    bindTargets(main, _p, m.month);
+  }
+
+  const canEditTargets = () => App.user && App.user.role !== "user";
+  function targetsButtons() {
+    return canEditTargets() ? `<button class="btn btn-primary" id="timport">${icon("download")}Import targets…</button>` : "";
+  }
+  function bindTargets(main, _p, month) {
+    const reload = (mm) => targetsPage(main, _p, mm).then(() => Hydra.hydrateIcons(main));
+    if ($("#tnowd")) $("#tnowd").onclick = async () => {
+      const v = await modal({ title: "Working days (NOWD)", body: `<div class="field"><label>Working days in ${esc(month)}</label><input class="input" type="number" min="1" max="31" id="nw" value="${esc($("#tnowd").closest(".stat").querySelector(".v").textContent.replace("—", ""))}">
+          <div class="hint">From the NSM's competition calendar (e.g. November 2026 = 24: 30 days − 5 Sundays − Poya).</div></div>`,
+        buttons: [{ label: "Cancel", value: null }, { label: "Save", cls: "btn-primary", value: (mm) => $("#nw", mm).value }] });
+      if (!v) return;
+      const r = await call("targets_set_nowd", month, v);
+      r.ok ? (toast("success", "NOWD saved"), reload(month)) : toast("error", "Not saved", r.error);
+    };
+    if ($("#timport")) $("#timport").onclick = async () => {
+      const pick = await call("targets_choose_file");
+      if (!pick.ok || !pick.path) return;
+      const f = await call("targets_inspect", pick.path);
+      if (!f.ok) return toast("error", "Cannot read targets", f.error);
+      const v = await modal({ title: "Import targets", body: `<div class="stack">
+          <div><b>${esc(f.file_name)}</b></div>
+          <div class="row wrap" style="gap:18px"><span><span class="faint">Territories</span> <b>${f.territories}</b></span><span><span class="faint">GT</span> <b>${money(f.gt_total)}</b></span><span><span class="faint">SMMT</span> <b>${money(f.smmt_total)}</b></span><span><span class="faint">National</span> <b>${money(f.total)}</b></span></div>
+          ${f.warnings.length ? `<div class="alert warn">${icon("warn")}<div>${f.warnings.map(esc).join("<br>")}</div></div>` : `<div class="alert ok">${icon("okcircle")}<div>Every subtotal adds up.</div></div>`}
+          <div class="field"><label>Targets are for month</label><input class="input" type="month" id="tm" value="${esc(f.month || "")}"></div>
+          ${f.exists ? `<label class="check"><input type="checkbox" id="tov"> Replace the targets already saved for this month</label>` : ""}</div>`,
+        buttons: [{ label: "Cancel", value: null }, { label: "Import", cls: "btn-primary", value: (mm) => ({ month: $("#tm", mm).value, over: $("#tov", mm) ? $("#tov", mm).checked : false }) }] });
+      if (!v) return;
+      const r = await call("targets_import", pick.path, v.month, v.over);
+      r.ok ? (toast("success", `Targets imported for ${v.month}`, `${r.territories} territories`), reload(v.month)) : toast("error", "Not imported", r.error);
+    };
+  }
+
+  // =============================================================== Run Center
+  async function runCenter(main) {
+    const types = (await call("reports_types")).types;
+    const yday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    main.innerHTML = `${head("Generate", "Run Center", "Pick a report date, check the data is there, and generate. Until Phase 2 downloads SFA files automatically, import them on the SFA Data screen first.")}
+      <div class="cards c2" style="grid-template-columns:2fr 3fr;align-items:start">
+        <div class="card"><div class="card-h">${icon("run")}<h3>New run</h3></div><div class="card-b stack">
+          <div class="field"><label>Report date</label><input class="input" type="date" id="rdate" value="${yday}"></div>
+          <div class="field"><label>Reports</label>${types.map((t) => `<label class="check" style="margin:3px 0"><input type="checkbox" class="rtype" value="${t.id}" checked> ${esc(t.name)}</label>`).join("")}</div>
+          <button class="btn btn-primary btn-lg" id="rgo">${icon("zap")}Generate reports</button></div></div>
+        <div class="card"><div class="card-h">${icon("check")}<h3>Data check</h3><span class="spacer"></span><button class="btn btn-ghost btn-sm" id="rdata">${icon("database")}SFA Data</button></div><div class="card-b" id="rready"><span class="spinner"></span></div></div>
+      </div>
+      <div id="rres" style="margin-top:16px"></div>`;
+    async function ready() {
+      const r = await call("reports_readiness", $("#rdate").value);
+      if (!r.ok) return ($("#rready").innerHTML = `<div class="alert err">${esc(r.error)}</div>`);
+      $("#rready").innerHTML = `<div class="checklist">${r.items.map((i) => `<div class="c ${i.ok ? "done" : "todo"}">${icon(i.ok ? "okcircle" : "warn")}<span><b>${esc(i.item)}</b><br><small class="faint">${esc(i.needed_by)}</small></span><span class="chip ${i.ok ? "ok" : "warn"}">${esc(i.detail)}</span></div>`).join("")}</div>`;
+      Hydra.hydrateIcons($("#rready"));
+    }
+    $("#rdate").onchange = ready;
+    $("#rdata").onclick = () => App.go("data");
+    $("#rgo").onclick = async () => {
+      const sel = $$(".rtype").filter((x) => x.checked).map((x) => x.value);
+      if (!sel.length) return toast("warning", "Choose at least one report");
+      busy($("#rgo"), true, "Generating…");
+      const r = await call("reports_generate", $("#rdate").value, sel);
+      busy($("#rgo"), false);
+      if (!r.ok) return toast("error", "Generation failed", r.error);
+      $("#rres").innerHTML = `<div class="card"><div class="card-h">${icon("file")}<h3>Results — ${esc($("#rdate").value)}</h3><span class="spacer"></span>
+          <button class="btn btn-secondary btn-sm" id="rfold">${icon("folder")}Open folder</button></div><div class="card-b stack">
+        ${r.results.map((x) => `<div class="panel"><div class="row wrap">
+            <span class="chip ${x.status === "generated" ? "ok" : x.status === "skipped" ? "" : "err"}">${esc(x.status)}</span><b>${esc(x.title)}</b><span class="spacer"></span>
+            ${x.path ? `<button class="btn btn-dark btn-sm" data-open="${esc(x.path)}">${icon("file")}Open Excel</button>` : ""}</div>
+          ${Object.keys(x.summary || {}).length ? `<div class="row wrap" style="gap:18px;margin-top:8px">${Object.entries(x.summary).map(([k, v]) => `<span><span class="faint">${esc(k)}</span> <b>${typeof v === "number" ? (Math.abs(v) < 5 && !Number.isInteger(v) ? (v * 100).toFixed(1) + "%" : money(v)) : esc(Array.isArray(v) ? v.join(", ") : v)}</b></span>`).join("")}</div>` : ""}
+          ${x.error ? `<div class="alert ${x.status === "skipped" ? "info" : "err"}" style="margin-top:8px">${icon(x.status === "skipped" ? "info" : "error")}<div>${esc(x.error)}</div></div>` : ""}
+          ${(x.warnings || []).map((w) => `<div class="alert warn" style="margin-top:8px">${icon("warn")}<div>${esc(w)}</div></div>`).join("")}</div>`).join("")}
+        <div class="faint">PDF / PNG versions and the Preview &amp; Send pop-up arrive in Phase 8.</div></div></div>`;
+      Hydra.hydrateIcons($("#rres"));
+      $("#rfold").onclick = () => call("open_path", r.folder);
+      $$("[data-open]").forEach((b) => b.onclick = async () => { const o = await call("open_path", b.dataset.open); if (!o.ok) toast("error", "Cannot open", o.error); });
+      App.refreshStatus();
+    };
+    await ready();
+  }
+
+  // =============================================================== Reports History
+  async function reportsHistory(main) {
+    const types = (await call("reports_types")).types;
+    main.innerHTML = `${head("History", "Reports History", "Every report Hydra has generated. Approve / send to WhatsApp arrives with Phases 8–9.")}
+      <div class="row wrap" style="margin-bottom:12px"><select class="input select" id="hType" style="width:240px"><option value="">All reports</option>${types.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>
+        <select class="input select" id="hStat" style="width:180px"><option value="">Any status</option><option>generated</option><option>failed</option><option>skipped</option></select></div>
+      <div class="card"><div class="card-b" id="hlist"><span class="spinner"></span></div></div>`;
+    async function load() {
+      const r = await call("reports_history", $("#hType").value, $("#hStat").value);
+      if (!r.ok) throw new Error(r.error);
+      $("#hlist").innerHTML = r.reports.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Report date</th><th>Report</th><th>Generated</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
+        ${r.reports.map((x) => `<tr><td class="mono">${esc(x.report_date)}</td><td><b>${esc(x.name)}</b><br><small class="faint">${esc(x.title)}</small></td><td class="faint">${fmtTime(x.created_at)}</td><td class="faint">${esc(x.created_by || "")}</td>
+          <td><span class="chip ${x.status === "generated" ? "ok" : x.status === "skipped" ? "" : "err"}" title="${esc((x.warnings || []).join("\n"))}">${esc(x.status)}</span>${x.warnings.length && x.status === "generated" ? ` <span class="chip warn" title="${esc(x.warnings.join("\n"))}">${icon("warn")}${x.warnings.length}</span>` : ""}</td>
+          <td>${x.exists ? `<div class="row"><button class="btn btn-dark btn-sm" data-open="${esc(x.xlsx_path)}">${icon("file")}Excel</button></div>` : x.xlsx_path ? `<span class="faint">File moved</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty"><img src="assets/img/hydra_logo_silver.png"><h3>No reports yet</h3>Generate them in the Run Center.</div>`;
+      Hydra.hydrateIcons($("#hlist"));
+      $$("[data-open]").forEach((b) => b.onclick = async () => { const o = await call("open_path", b.dataset.open); if (!o.ok) toast("error", "Cannot open", o.error); });
+    }
+    $("#hType").onchange = load; $("#hStat").onchange = load;
+    await load();
+  }
+
+  window.Pages = { run: runCenter, reports: reportsHistory, targets: targetsPage, dashboard, notifications, logs, settings: settingsPage, about, placeholder, notifItem, changePassword, colleagues, data: dataPage, territories: territoriesPage };
   Object.keys(PLAN).forEach((k) => window.Pages[k] = placeholder);
 })();

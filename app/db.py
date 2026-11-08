@@ -95,6 +95,180 @@ MIGRATIONS: list[tuple[int, str]] = [
         steps_json  TEXT NOT NULL
     );
     """),
+    (2, """
+    -- Every SFA Excel file Hydra reads (downloaded automatically or imported by hand)
+    CREATE TABLE imports (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind          TEXT NOT NULL,          -- sku | callage | sales_order | rep_performance
+        file_name     TEXT NOT NULL,
+        sha256        TEXT NOT NULL,
+        title         TEXT,
+        period_from   TEXT,
+        period_to     TEXT,
+        generated_at  TEXT,
+        rows          INTEGER NOT NULL,
+        check_field   TEXT,
+        check_total   REAL,
+        file_total    REAL,
+        meta_json     TEXT NOT NULL DEFAULT '{}',
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        source        TEXT NOT NULL DEFAULT 'manual',   -- manual | auto
+        run_id        INTEGER,
+        imported_at   TEXT NOT NULL,
+        imported_by   TEXT,
+        status        TEXT NOT NULL DEFAULT 'active'    -- active | replaced
+    );
+    CREATE INDEX ix_imports_kind ON imports(kind, period_from);
+    CREATE INDEX ix_imports_sha ON imports(sha256);
+
+    CREATE TABLE sku_lines (
+        import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+        date TEXT, rsm TEXT, asm TEXT, ase TEXT, territory TEXT, distributor TEXT,
+        sales_rep_code TEXT, sales_rep_type TEXT, sales_rep_model TEXT, sales_rep TEXT,
+        outlet_code TEXT, outlet_classification TEXT, outlet TEXT, route_code TEXT, route TEXT,
+        invoice_no TEXT, category TEXT, brand TEXT, product_code TEXT, product TEXT,
+        wholesale_price REAL, mrp REAL, units REAL, sales_value REAL, sales_volume_mt REAL
+    );
+    CREATE INDEX ix_sku_date_terr ON sku_lines(date, territory);
+    CREATE INDEX ix_sku_import ON sku_lines(import_id);
+
+    CREATE TABLE callage_lines (
+        import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+        date TEXT NOT NULL,
+        rsm_code TEXT, rsm TEXT, asm_code TEXT, asm TEXT, ase_code TEXT, ase TEXT,
+        sales_rep_code TEXT, sales_rep_type TEXT, territory TEXT, sales_rep TEXT,
+        ipd REAL, nod REAL, ipd_nod_pct REAL, schedule_calls REAL, calls_made REAL, sc_cm_pct REAL,
+        productive_calls REAL, unproductive_calls REAL, missed_calls REAL, productivity_pct REAL,
+        unplanned_visits REAL, lines_per_bill REAL
+    );
+    CREATE INDEX ix_callage_date_terr ON callage_lines(date, territory);
+    CREATE INDEX ix_callage_import ON callage_lines(import_id);
+
+    CREATE TABLE sales_orders (
+        import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+        date TEXT,
+        so_number TEXT, territory TEXT, distributor TEXT, sales_rep TEXT, route TEXT, customer TEXT,
+        pricing_scheme TEXT, gross_amount REAL, discount REAL, net_amount REAL, battery REAL, app_version TEXT,
+        gps_lat REAL, gps_lng REAL, created_by TEXT, created_tab_date TEXT, created_tab_time TEXT,
+        created_server_date TEXT, created_server_time TEXT, invoice_status TEXT
+    );
+    CREATE INDEX ix_so_date_terr ON sales_orders(date, territory);
+    CREATE INDEX ix_so_import ON sales_orders(import_id);
+
+    CREATE TABLE rep_perf_lines (
+        import_id INTEGER NOT NULL REFERENCES imports(id) ON DELETE CASCADE,
+        period_from TEXT, period_to TEXT, territory TEXT, sales_rep TEXT,
+        total_customers REAL, served_customers REAL, total_bills REAL, productive_calls REAL, bill_days REAL,
+        no_of_skus REAL, sold_skus REAL, discounted_total_sales REAL, total_returns REAL, item_discount REAL,
+        free_issue_valuation REAL, cash_collection REAL, cheque_collection REAL, outstanding REAL,
+        achieved_sales REAL, achieved_collection REAL, lpb REAL
+    );
+    CREATE INDEX ix_rp_period ON rep_perf_lines(period_from, territory);
+
+    -- Territories seen in SFA data (Territory Sync adds region/status later)
+    CREATE TABLE territories (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        selling_mode TEXT CHECK (selling_mode IN ('van','pre')),
+        mode_source  TEXT,                 -- auto (from SKU "SALES REP MODEL") | manual
+        is_smmt      INTEGER NOT NULL DEFAULT 0,
+        first_seen   TEXT NOT NULL,
+        last_seen    TEXT NOT NULL
+    );
+    """),
+    (3, """
+    -- Monthly hierarchy + targets (from the NSM's target workbook or Famulus)
+    CREATE TABLE target_months (
+        month          TEXT PRIMARY KEY,          -- YYYY-MM
+        status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','locked')),
+        nowd           INTEGER,                   -- number of working days
+        nowd_manual    INTEGER NOT NULL DEFAULT 0,
+        source         TEXT,                      -- famulus | nsm_workbook | editor
+        source_file    TEXT,
+        national_total REAL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+
+    CREATE TABLE hierarchy_nodes (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        month          TEXT NOT NULL REFERENCES target_months(month) ON DELETE CASCADE,
+        parent_id      INTEGER REFERENCES hierarchy_nodes(id) ON DELETE CASCADE,
+        level          INTEGER NOT NULL,          -- 0 National 1 Region 2 RSM 3 ASM 4 DTM 5 ASE 6 Territory
+        sort_order     INTEGER NOT NULL,
+        label          TEXT NOT NULL,
+        db_code        TEXT,
+        distributor    TEXT,
+        csr            TEXT,
+        is_operating   INTEGER,
+        flagged_red    INTEGER NOT NULL DEFAULT 0,
+        is_smmt        INTEGER NOT NULL DEFAULT 0,
+        target         REAL,                      -- territory rows: monthly target
+        declared_total REAL,                      -- subtotal printed in the source file
+        sfa_territory  TEXT                       -- matching SFA territory name
+    );
+    CREATE INDEX ix_hier_month ON hierarchy_nodes(month, level);
+
+    -- Callage ready for reports: Van rows from the report day + Pre rows from the previous working day
+    CREATE TABLE callage_prepared (
+        import_id          INTEGER REFERENCES imports(id) ON DELETE CASCADE,
+        date               TEXT NOT NULL,
+        territory          TEXT,
+        rsm TEXT, asm TEXT, ase TEXT,
+        sales_rep_code     TEXT,
+        sales_rep          TEXT,
+        selling_mode       TEXT,
+        source_date        TEXT,
+        ipd REAL, nod REAL, schedule_calls REAL, calls_made REAL, productive_calls REAL,
+        unproductive_calls REAL, missed_calls REAL, productivity_pct REAL, unplanned_visits REAL,
+        source             TEXT NOT NULL           -- hydra | famulus
+    );
+    CREATE INDEX ix_cprep_date_terr ON callage_prepared(date, territory);
+
+    CREATE TABLE outlet_categories (
+        category_key           TEXT PRIMARY KEY,  -- lower-case label
+        label                  TEXT NOT NULL,
+        pricing_scheme         TEXT,
+        include_in_competition INTEGER NOT NULL DEFAULT 1,
+        updated_at             TEXT NOT NULL
+    );
+
+    CREATE TABLE competition_rounds (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        month          TEXT NOT NULL,
+        name           TEXT NOT NULL,
+        colour         TEXT,
+        van_sale_limit REAL NOT NULL DEFAULT 100000,
+        van_bill_limit REAL NOT NULL DEFAULT 20,
+        pre_sale_limit REAL NOT NULL DEFAULT 125000,
+        pre_bill_limit REAL NOT NULL DEFAULT 30,
+        created_at     TEXT NOT NULL
+    );
+    CREATE TABLE competition_days (
+        round_id INTEGER NOT NULL REFERENCES competition_rounds(id) ON DELETE CASCADE,
+        date     TEXT NOT NULL,
+        PRIMARY KEY (round_id, date)
+    );
+    """),
+    (4, """
+    -- Every report file Hydra generates
+    CREATE TABLE reports (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id        INTEGER,
+        report_type   TEXT NOT NULL,     -- day_report | target_vs_achievement | sales_comparison | daily_winners | pending_orders
+        report_date   TEXT NOT NULL,
+        title         TEXT NOT NULL,
+        xlsx_path     TEXT,
+        pdf_path      TEXT,
+        png_paths     TEXT,
+        status        TEXT NOT NULL DEFAULT 'generated',   -- generated | approved | sent | saved | failed | skipped
+        summary_json  TEXT NOT NULL DEFAULT '{}',
+        warnings_json TEXT NOT NULL DEFAULT '[]',
+        created_at    TEXT NOT NULL,
+        created_by    TEXT
+    );
+    CREATE INDEX ix_reports_date ON reports(report_date, report_type);
+    """),
 ]
 
 

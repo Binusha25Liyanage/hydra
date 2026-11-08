@@ -281,6 +281,203 @@ class Api:
                    "Hydra will now run the full startup check every time it opens.")
         return {"next": "splash"}
 
+    # =========================================================== SFA data (imports)
+    @api_method
+    def data_choose_files(self):
+        import webview
+        auth.require()
+        if not self._window:
+            return {"ok": False, "error": "No window"}
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+                                              file_types=("Excel files (*.xlsx)", "All files (*.*)"))
+        return {"paths": list(res or [])}
+
+    @api_method
+    def data_inspect(self, paths):
+        auth.require()
+        from .data import store
+        return {"files": [store.inspect(p) for p in paths]}
+
+    @api_method
+    def data_import(self, items):
+        user = auth.require()
+        from .data import store
+        from .data.sfa_excel import ExportError
+        results = []
+        for it in items:
+            try:
+                r = store.import_file(it["path"], replace=bool(it.get("replace")), source="manual",
+                                      user=user["username"])
+                results.append({"ok": True, "file_name": r["file_name"], "import_id": r["import_id"],
+                                "kind": r["kind"], "rows": r["rows"], "replaced": bool(r["replaced"])})
+            except ExportError as e:
+                results.append({"ok": False, "file_name": Path(it["path"]).name, "error": str(e)})
+        done = [r for r in results if r["ok"]]
+        if done:
+            notify.add("data", "success", f"Imported {len(done)} SFA file(s)",
+                       ", ".join(f"{r['file_name']} ({r['rows']} rows)" for r in done)[:400])
+        return {"results": results}
+
+    @api_method
+    def data_imports(self, kind=""):
+        auth.require()
+        from .data import store
+        return {"imports": store.list_imports(kind or ""), "coverage": store.coverage(21)}
+
+    @api_method
+    def data_delete(self, import_id):
+        user = auth.require("superadmin", "admin")
+        from .data import store
+        store.delete_import(int(import_id), user["username"])
+
+    @api_method
+    def famulus_choose(self):
+        import webview
+        auth.require("superadmin", "admin")
+        if not self._window:
+            return {"ok": False, "error": "No window"}
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
+                                              file_types=("Famulus database (*.db)", "All files (*.*)"))
+        return {"path": (res[0] if res else "")}
+
+    @api_method
+    def famulus_inspect(self, path):
+        auth.require("superadmin", "admin")
+        from .data import famulus
+        from .data.sfa_excel import ExportError
+        try:
+            return famulus.inspect(path)
+        except ExportError as e:
+            return {"ok": False, "error": str(e)}
+
+    @api_method
+    def famulus_import(self, path, parts, overwrite=False):
+        user = auth.require("superadmin", "admin")
+        from .data import famulus
+        from .data.sfa_excel import ExportError
+        try:
+            rep = famulus.import_all(path, parts, bool(overwrite), user["username"])
+        except ExportError as e:
+            return {"ok": False, "error": str(e)}
+        notify.add("data", "success", "Imported from Famulus", "; ".join(f"{k}: {v}" for k, v in rep.items())[:500])
+        return {"report": rep}
+
+    @api_method
+    def targets_month(self, month=""):
+        auth.require()
+        from .data import famulus
+        if not month:
+            row = db.conn().execute("SELECT month FROM target_months ORDER BY month DESC LIMIT 1").fetchone()
+            month = row[0] if row else ""
+        return famulus.month_tree(month) if month else {"month": None, "tree": [], "months": []}
+
+    # =========================================================== reports
+    @api_method
+    def reports_types(self):
+        auth.require()
+        from .reports.builders import REPORT_TYPES
+        return {"types": [{"id": k, "name": v} for k, v in REPORT_TYPES.items()]}
+
+    @api_method
+    def reports_readiness(self, day):
+        auth.require()
+        from datetime import date as _d
+        from .reports import engine
+        return {"items": engine.readiness(_d.fromisoformat(day))}
+
+    @api_method
+    def reports_generate(self, day, types):
+        user = auth.require()
+        from datetime import date as _d
+        from .reports import engine
+        res = engine.generate(_d.fromisoformat(day), list(types or []), user["username"])
+        ok = [r for r in res if r["status"] == "generated"]
+        bad = [r for r in res if r["status"] == "failed"]
+        notify.add("reports", "error" if bad else "success",
+                   f"{len(ok)} report(s) generated for {day}" + (f", {len(bad)} failed" if bad else ""),
+                   "; ".join(f"{r['name']}: {r['error']}" for r in res if r["error"])[:400], "reports")
+        return {"results": res, "folder": str(engine.output_dir(_d.fromisoformat(day)))}
+
+    @api_method
+    def reports_history(self, report_type="", status=""):
+        auth.require()
+        from .reports import engine
+        return {"reports": engine.history(400, report_type or "", status or "")}
+
+    @api_method
+    def open_path(self, path):
+        """Open a generated file or its folder (only inside Hydra's output / data folders)."""
+        auth.require()
+        p = Path(path).resolve()
+        roots = [Path(settings.get("output.root") or paths.data_root()).resolve(), paths.data_root().resolve()]
+        if not any(str(p).startswith(str(r)) for r in roots):
+            return {"ok": False, "error": "This file is outside Hydra's folders"}
+        if not p.exists():
+            return {"ok": False, "error": "The file no longer exists"}
+        if sys.platform.startswith("win"):
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(p)])
+        return {}
+
+    # =========================================================== targets
+    @api_method
+    def targets_choose_file(self):
+        import webview
+        auth.require("superadmin", "admin")
+        if not self._window:
+            return {"ok": False, "error": "No window"}
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Excel files (*.xlsx)",))
+        return {"path": res[0] if res else ""}
+
+    @api_method
+    def targets_inspect(self, path):
+        auth.require("superadmin", "admin")
+        from .data import targets_import
+        from .data.sfa_excel import ExportError
+        try:
+            p = targets_import.parse(path)
+        except ExportError as e:
+            return {"ok": False, "error": str(e)}
+        p.pop("root")
+        p["exists"] = bool(p["month"]) and db.conn().execute(
+            "SELECT 1 FROM hierarchy_nodes WHERE month=? LIMIT 1", (p["month"],)).fetchone() is not None
+        return p
+
+    @api_method
+    def targets_import(self, path, month, overwrite=False):
+        user = auth.require("superadmin", "admin")
+        from .data import targets_import
+        from .data.sfa_excel import ExportError
+        try:
+            r = targets_import.save(targets_import.parse(path), month, bool(overwrite), user["username"])
+        except ExportError as e:
+            return {"ok": False, "error": str(e)}
+        notify.add("data", "success", f"Targets imported for {month}", f"{r['territories']} territories · {r['total']:,.0f}")
+        return r
+
+    @api_method
+    def targets_set_nowd(self, month, nowd):
+        user = auth.require("superadmin", "admin")
+        from .data import targets_import
+        from .data.sfa_excel import ExportError
+        try:
+            targets_import.set_nowd(month, int(nowd), user["username"])
+        except (ExportError, ValueError) as e:
+            return {"ok": False, "error": str(e)}
+
+    @api_method
+    def territories_list(self):
+        auth.require()
+        from .data import store
+        return {"territories": store.territories()}
+
+    @api_method
+    def territory_set_mode(self, name, mode):
+        user = auth.require("superadmin", "admin")
+        from .data import store
+        store.set_selling_mode(name, mode or None, user["username"])
+
     # =========================================================== settings
     @api_method
     def settings_get(self):

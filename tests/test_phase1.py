@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-os.environ["HYDRA_DATA_DIR"] = tempfile.mkdtemp(prefix="hydra_test_")
+os.environ.setdefault("HYDRA_DATA_DIR", tempfile.mkdtemp(prefix="hydra_test_"))
 sys.path.insert(0, str(ROOT))
 
 from app import auth, db, settings  # noqa: E402

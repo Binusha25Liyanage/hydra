@@ -5,7 +5,7 @@
     dashboard: "Dashboard", run: "Run Center", reports: "Reports History", territories: "Territories",
     targets: "Hierarchy & Targets", calendar: "Competition Calendar", aliases: "Aliases & Labels",
     reconciliation: "Reconciliation", schedule: "Schedule", whatsapp: "WhatsApp", activity: "Activity Monitor",
-    notifications: "Notifications", logs: "Logs", settings: "Settings", about: "About", colleagues: "Colleagues",
+    notifications: "Notifications", logs: "Logs", settings: "Settings", about: "About", colleagues: "Colleagues", data: "SFA Data",
   };
   window.App = { user: null, status: null, go, refreshStatus };
 
@@ -80,6 +80,8 @@
     $("#urole").textContent = `${st.user.username} · ${st.user.role}`;
     if (st.user.role === "user") $("#m-wizard").classList.add("hidden");
     $$("[data-role]").forEach((el) => el.classList.toggle("hidden", el.dataset.role !== st.user.role));
+    const info = await call("app_info");
+    if (info.ok) $("#sidefoot").textContent = info.phase;
     await refreshStatus();
     setInterval(refreshStatus, 30000);
     go((location.hash || "#dashboard").slice(1));
