@@ -61,6 +61,8 @@
     flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
     save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
     store: '<path d="M3 9l1-5h16l1 5"/><path d="M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 13v8h14v-8"/>',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+    play: '<polygon points="6 4 20 12 6 20 6 4"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
     send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
@@ -126,11 +128,11 @@
   }
 
   // ------------------------------------------------------------ modal
-  function modal({ title, body, buttons }) {
+  function modal({ title, body, buttons, wide, onOpen }) {
     return new Promise((resolve) => {
       const back = document.createElement("div");
       back.className = "modal-back";
-      back.innerHTML = `<div class="modal"><div class="modal-h"><img src="assets/img/hydra_logo_silver.png" alt=""><h3>${esc(title)}</h3></div>
+      back.innerHTML = `<div class="modal${wide ? " wide" : ""}"><div class="modal-h"><img src="assets/img/hydra_logo_silver.png" alt=""><h3>${esc(title)}</h3></div>
         <div class="modal-b">${body}</div><div class="modal-f"></div></div>`;
       const foot = $(".modal-f", back);
       (buttons || [{ label: "OK", value: true, cls: "btn-primary" }]).forEach((b) => {
@@ -141,6 +143,7 @@
         foot.appendChild(btn);
       });
       document.body.appendChild(back);
+      if (onOpen) onOpen(back);
       const first = $("input", back); if (first) first.focus();
     });
   }

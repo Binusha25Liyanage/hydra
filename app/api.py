@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 import threading as _threading
 
-from . import auth, db, logging_setup, notify, paths, settings, version
+from . import auth, db, logging_setup, notify, paths, runner, settings, version
+from .scheduler import SCHEDULER
+from . import autostart, tray
 from .startup import StartupSequence
 from .whatsapp import status as wa_status
 
@@ -59,8 +61,6 @@ def api_method(fn):
     return wrapper
 
 
-_RUN_LOCK = _threading.Lock()
-_RUN: dict = {"running": False, "text": "", "stop": None}
 
 
 class Api:
@@ -394,38 +394,26 @@ class Api:
     @api_method
     def reports_generate(self, day, types, formats=None):
         user = auth.require()
-        import threading
         from datetime import date as _d
-        from .reports import engine
-        with _RUN_LOCK:
-            if _RUN["running"]:
-                return {"ok": False, "error": "A run is already in progress"}
-            _RUN.update(running=True, text="Starting…", stop=threading.Event(), day=day, started=db.now_iso())
+        from . import runner
         try:
-            fm = tuple(formats) if formats is not None else tuple(settings.get("reports.formats") or ("pdf", "png"))
-            res = engine.generate(_d.fromisoformat(day), list(types or []), user["username"], formats=fm,
-                                  stop=_RUN["stop"].is_set, progress=lambda t: _RUN.update(text=t))
-        finally:
-            _RUN.update(running=False, text="")
-        ok = [r for r in res if r["status"] == "generated"]
-        bad = [r for r in res if r["status"] == "failed"]
-        stopped = _RUN["stop"].is_set()
-        notify.add("reports", "error" if bad else ("warning" if stopped else "success"),
-                   f"{len(ok)} report(s) generated for {day}" + (f", {len(bad)} failed" if bad else "") + (" — stopped" if stopped else ""),
-                   "; ".join(f"{r['name']}: {r['error']}" for r in res if r["error"])[:400], "reports")
-        return {"results": res, "folder": str(engine.output_dir(_d.fromisoformat(day))), "stopped": stopped}
+            return runner.run(_d.fromisoformat(day), list(types or []), tuple(formats) if formats is not None else None,
+                              user["username"], trigger="manual", delivery="preview")
+        except runner.Busy as e:
+            return {"ok": False, "error": str(e)}
 
     @api_method
     def reports_progress(self):
         auth.require()
-        return {"running": _RUN["running"], "text": _RUN["text"], "day": _RUN.get("day")}
+        from . import runner
+        return runner.snapshot()
 
     @api_method
     def reports_stop(self):
         user = auth.require()
-        if _RUN["running"] and _RUN.get("stop"):
-            _RUN["stop"].set()
-            db.audit(user["username"], "reports.stop", _RUN.get("day") or "")
+        from . import runner
+        if runner.stop():
+            db.audit(user["username"], "reports.stop", runner.STATE.get("day") or "")
             return {"stopping": True}
         return {"stopping": False}
 
@@ -689,6 +677,92 @@ class Api:
         settings.set("whatsapp.send_timeout_s", max(20, min(600, int(data.get("send_timeout_s") or 90))))
         db.audit(user["username"], "whatsapp.settings", url)
 
+    # =========================================================== Phase 10: schedule & background
+    @api_method
+    def schedule_list(self):
+        auth.require()
+        from . import scheduler as S
+        return {"schedules": S.listing(), "status": SCHEDULER.status(), "runs": runner.history(60),
+                "background": {"close_to_tray": bool(settings.get("ui.close_to_tray", True)),
+                               "autostart": autostart.enabled(), "autostart_supported": autostart.supported(),
+                               "tray_supported": tray.supported()}}
+
+    @api_method
+    def schedule_save(self, data):
+        user = auth.require("superadmin", "admin")
+        from . import scheduler as S
+        try:
+            return {"id": S.save(data, user["username"])}
+        except S.ScheduleError as e:
+            return {"ok": False, "error": str(e)}
+
+    @api_method
+    def schedule_active(self, sid, active):
+        user = auth.require("superadmin", "admin")
+        from . import scheduler as S
+        S.set_active(sid, bool(active), user["username"])
+
+    @api_method
+    def schedule_delete(self, sid):
+        user = auth.require("superadmin", "admin")
+        from . import scheduler as S
+        S.delete(sid, user["username"])
+
+    @api_method
+    def schedule_pause(self, paused):
+        user = auth.require("superadmin", "admin")
+        settings.set("scheduler.enabled", not paused)
+        db.audit(user["username"], "schedule.pause_all" if paused else "schedule.resume_all", "")
+        SCHEDULER.wake()
+        return SCHEDULER.status()
+
+    @api_method
+    def schedule_run_now(self, sid):
+        """Run a schedule now (its own reports, date rule and delivery) — in the background."""
+        user = auth.require()
+        from datetime import date as _d
+        from . import scheduler as S
+        s = next((x for x in S.listing() if x["id"] == int(sid)), None)
+        if not s:
+            return {"ok": False, "error": "Schedule not found"}
+        if runner.STATE["running"]:
+            return {"ok": False, "error": "A run is already in progress"}
+        rd = S.report_date(s["date_mode"], _d.today())
+
+        def go():
+            try:
+                runner.run(rd, s["report_types"] or None, tuple(s["formats"]), user["username"], trigger="manual",
+                           delivery=s["delivery"], schedule_id=s["id"], label=s["name"])
+            except runner.Busy:
+                pass
+            except Exception:
+                logging.getLogger("hydra.api").exception("Run now failed")
+        _threading.Thread(target=go, daemon=True, name="hydra-run-now").start()
+        return {"started": True, "report_date": rd.isoformat()}
+
+    @api_method
+    def runs_history(self, limit=100):
+        auth.require()
+        return {"runs": runner.history(int(limit))}
+
+    @api_method
+    def run_reports(self, run_id):
+        auth.require()
+        return {"ids": runner.report_ids(int(run_id))}
+
+    @api_method
+    def background_save(self, close_to_tray=None, autostart_on=None):
+        user = auth.require()
+        if close_to_tray is not None:
+            settings.set("ui.close_to_tray", bool(close_to_tray))
+        if autostart_on is not None:
+            try:
+                autostart.set_enabled(bool(autostart_on))
+            except Exception as e:
+                return {"ok": False, "error": f"Could not change Windows start-up: {e}"}
+        db.audit(user["username"], "background.save", f"tray={close_to_tray} autostart={autostart_on}")
+        return {"close_to_tray": bool(settings.get("ui.close_to_tray", True)), "autostart": autostart.enabled()}
+
     @api_method
     def territories_list(self):
         auth.require()
@@ -757,9 +831,10 @@ class Api:
                     "latency_ms": sfa.get("latency_ms", 0), "message": sfa.get("message", ""),
                     "display_name": sfa.get("display_name", ""), "ts": sfa.get("ts", "")},
             "whatsapp": wa_status.status(),
-            "worker": {"state": "not_installed", "label": "Scheduler arrives in Phase 10"},
-            "run": {"running": _RUN["running"], "text": _RUN["text"]},
-            "next_run": None,
+            "worker": (sch := SCHEDULER.status()),
+            "run": runner.snapshot(),
+            "next_run": (sch.get("next") or {}).get("at"),
+            "next_run_name": (sch.get("next") or {}).get("name"),
             "data_today_mb": 0.0,
             "unread": notify.unread_count(),
             "version": version.VERSION,

@@ -66,6 +66,9 @@ DEFAULTS: dict = {
         "pending": ['div.message-out [data-icon="msg-time"]'],
         "invalid_phone": ['text=/Phone number shared via url is invalid/i'],
     },
+    # Schedule (Phase 10)
+    "scheduler.enabled": True,
+    "ui.close_to_tray": True,            # closing the window keeps Hydra (and the schedule) running in the tray
     # Output
     "output.root": "",
     # Startup

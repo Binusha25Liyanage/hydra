@@ -2,7 +2,7 @@
 
 Hydra is a desktop app for Lakmee Exports Lanka that automates each person's work. It signs in to SalesPro SFA with that person's own account, runs the reports and processes their role needs, and delivers the results (Excel, PDF, PNG, WhatsApp) once someone approves them. The first role built is the management sales reports: Day Report, Target vs Achievement, Sales Comparison, Daily Winners, Pending Orders and Finalized Target vs Achievement.
 
-**This build is v0.7.0:** foundation, SFA data import, territories, the five daily sales reports (Excel, PDF and WhatsApp images), Preview & Send, the Targets editor, Competition Calendar, Aliases & Labels, and Phase 9 — WhatsApp sending (link by QR, recipients per report, send queue). Test WhatsApp without a phone with `python tools/mock_whatsapp.py`. Role work lives in `app/services/` — see `docs/ARCHITECTURE.md` and `docs/SERVICE_GUIDE.md`.
+**This build is v0.8.0:** foundation, SFA data import, territories, the five daily sales reports (Excel, PDF and WhatsApp images), Preview & Send, Targets editor, Competition Calendar, Aliases & Labels, WhatsApp sending, and Phase 10 — the Schedule (automatic runs, retry until data arrives, tray icon, start with Windows). Test WhatsApp without a phone with `python tools/mock_whatsapp.py`. Role work lives in `app/services/` — see `docs/ARCHITECTURE.md` and `docs/SERVICE_GUIDE.md`.
 
 ## Run it from source (Windows 10/11)
 

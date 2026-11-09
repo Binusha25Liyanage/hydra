@@ -302,6 +302,46 @@ MIGRATIONS: list[tuple[int, str]] = [
     CREATE INDEX ix_wa_sends_batch ON wa_sends(batch);
     CREATE INDEX ix_wa_sends_status ON wa_sends(status, created_at);
     """),
+    (6, """
+    -- Schedule (Phase 10): automatic runs, and a record of every run (manual or scheduled)
+    CREATE TABLE schedules (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        time         TEXT NOT NULL,                  -- HH:MM, this PC's local time
+        days         TEXT NOT NULL DEFAULT '1111110', -- Mon..Sun, 1 = runs that day
+        date_mode    TEXT NOT NULL DEFAULT 'yesterday' CHECK (date_mode IN ('today','yesterday','last_working')),
+        report_types TEXT NOT NULL DEFAULT '[]',     -- JSON list; empty = all reports
+        formats      TEXT NOT NULL DEFAULT '["pdf","png"]',
+        delivery     TEXT NOT NULL DEFAULT 'preview' CHECK (delivery IN ('preview','send','save')),
+        retry_min    INTEGER NOT NULL DEFAULT 15,    -- data not there yet: try again every N minutes
+        retry_max    INTEGER NOT NULL DEFAULT 4,
+        catch_up_min INTEGER NOT NULL DEFAULT 120,   -- Hydra was closed at run time: still run if opened within N minutes
+        active       INTEGER NOT NULL DEFAULT 1,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        created_by   TEXT
+    );
+    CREATE TABLE runs (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_id  INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+        slot         TEXT,                           -- schedule slot 'YYYY-MM-DDTHH:MM' (one run per slot)
+        trigger      TEXT NOT NULL,                  -- manual | schedule | catch_up
+        report_date  TEXT,
+        delivery     TEXT,
+        status       TEXT NOT NULL,                  -- waiting | running | done | partial | failed | stopped | missed
+        attempts     INTEGER NOT NULL DEFAULT 0,
+        next_try_at  TEXT,
+        started_at   TEXT NOT NULL,
+        finished_at  TEXT,
+        generated    INTEGER NOT NULL DEFAULT 0,
+        failed       INTEGER NOT NULL DEFAULT 0,
+        wa_batch     TEXT,
+        message      TEXT,
+        user         TEXT
+    );
+    CREATE UNIQUE INDEX ux_runs_slot ON runs(schedule_id, slot) WHERE slot IS NOT NULL;
+    CREATE INDEX ix_runs_started ON runs(started_at);
+    """),
 ]
 
 

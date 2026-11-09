@@ -7,3 +7,5 @@ openpyxl>=3.1.5
 keyring>=25.5.0
 pyperclip>=1.9.0
 psutil>=6.1.0
+pystray>=0.19.5
+pillow>=10.4.0

@@ -21,6 +21,12 @@ def _builder(report_id: str):
     return build
 
 
+def data_ready(d: date) -> tuple[bool, str]:
+    from ... import db
+    n = db.conn().execute("SELECT COUNT(*) FROM sku_lines WHERE date=?", (d.isoformat(),)).fetchone()[0]
+    return (n > 0, f"{n:,} SKU sales lines for {d}" if n else f"No SKU sales imported for {d} yet")
+
+
 SERVICE = Service(
     id="sales_reports",
     name="Management Sales Reports",
@@ -29,4 +35,5 @@ SERVICE = Service(
     sfa_pages=["sku", "callage", "preselling", "territory"],
     reports=[ReportDef(rid, name, _builder(rid)) for rid, name in REPORT_TYPES.items()],
     readiness=readiness,
+    data_ready=data_ready,
 )

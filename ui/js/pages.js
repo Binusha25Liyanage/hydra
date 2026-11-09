@@ -256,7 +256,6 @@
   // =============================================================== Placeholders
   const PLAN = {
     reconciliation: [7, "Reconciliation", ["Hydra achievement vs SFA Rep Performance per territory", "Tolerance highlight and possible causes"]],
-    schedule: [10, "Schedule", ["Run times with Today / Yesterday report date", "Monthly jobs and Activity Report schedule", "Runs while the window is closed"]],
     activity: [11, "Activity Monitor", ["Run history and data-burning meter", "Activity Reports for any period (Excel / PDF / WhatsApp)", "Health of SFA, WhatsApp, database and disk"]],
   };
   function placeholder(main, page) {

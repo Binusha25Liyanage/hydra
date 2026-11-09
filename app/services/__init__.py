@@ -36,6 +36,8 @@ class Service:
     sfa_pages: list[str] = field(default_factory=list)      # page profile keys it downloads
     reports: list[ReportDef] = field(default_factory=list)
     readiness: Callable[[date], list[dict]] | None = None   # data check shown before generating
+    # Scheduled runs wait (and retry) until this says the day's data is in: date -> (ready, message)
+    data_ready: Callable[[date], tuple[bool, str]] | None = None
     version: str = "1.0"
 
 

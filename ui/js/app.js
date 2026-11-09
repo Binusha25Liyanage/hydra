@@ -35,16 +35,16 @@
     $("#wachip").className = "chip " + (wa.linked ? "ok" : "");
     $("#wachip").innerHTML = `<span class="dot ${wa.linked ? "ok" : "off"}"></span>WA: ${wa.linked ? "Ready" : "Not linked"}`;
     ["#bellbadge", "#navbadge"].forEach((id) => { $(id).textContent = s.unread; $(id).classList.toggle("hidden", !s.unread); });
-    $("#s-next").textContent = s.next_run ? fmtTime(s.next_run) : "Not scheduled";
+    $("#s-next").textContent = s.next_run ? fmtTime(s.next_run) + (s.next_run_name ? " · " + s.next_run_name : "") : (s.worker.state === "paused" ? "Paused" : "Not scheduled");
     $("#s-data").textContent = s.data_today_mb.toFixed(1) + " MB";
-    $("#s-worker").textContent = s.worker.state === "not_installed" ? "Not installed (Phase 10)" : s.worker.label;
+    $("#s-worker").textContent = s.worker.label;
     $("#s-sfa").textContent = sfa.ts ? fmtAgo(sfa.ts) + (sfa.logged_in ? " · OK" : " · failed") : "—";
     $("#s-ver").textContent = "Hydra v" + s.version;
     const run = s.run || {};
     $("#stopall").disabled = !run.running;
     $("#stopall").title = run.running ? "Stop the current run: " + (run.text || "") : "Nothing is running";
     $("#gen").disabled = !!run.running;
-    $("#s-worker").textContent = run.running ? "Running — " + (run.text || "") : $("#s-worker").textContent;
+
     $("#vbadge").textContent = "v" + s.version.split(".").slice(0, 2).join(".");
   }
 

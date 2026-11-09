@@ -360,3 +360,28 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; }
 .pv-prog .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2F9E74, #4CC596); transition: width .4s; }
 .pv-prog .bar i.bad { background: linear-gradient(90deg, #D4A017, #F0642E); }
 .seg button:disabled { opacity: .5; }
+
+/* ---------- Phase 10: Schedule ---------- */
+.modal.wide { width: min(760px, 94vw); }
+.sstatus.paused, .sstatus.stopped { border-color: rgba(212,42,69,.5); }
+.sstatus.waiting { border-color: rgba(212,160,23,.5); }
+.sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.scard.off { opacity: .55; }
+.scard .stime { font-family: "JetBrains Mono", monospace; font-size: 30px; font-weight: 600; letter-spacing: -.02em; margin-right: 14px; color: #fff; }
+.scard .sname { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dpills { display: flex; gap: 3px; margin-top: 5px; }
+.dpills span { width: 18px; height: 18px; border-radius: 4px; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: var(--black-700); color: var(--muted, #8A8C93); }
+.dpills span.on { background: var(--cherry-600, #B3172F); color: #fff; }
+.dpills.big { gap: 6px; }
+.dpills.big button { width: 52px; height: 36px; border-radius: 8px; border: 1px solid var(--black-650); background: var(--black-800); color: var(--muted, #8A8C93); font-weight: 600; cursor: pointer; }
+.dpills.big button.on { background: linear-gradient(180deg, #C42A3A, #8E1220); border-color: #6E0E19; color: #fff; }
+.sfacts { display: grid; grid-template-columns: 92px 1fr; gap: 6px 10px; font-size: 13px; align-items: center; }
+.sfacts > span { color: var(--muted, #8A8C93); font-size: 12px; }
+.sfacts b { font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sfacts b svg { width: 14px; height: 14px; }
+.dopts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.dopts button { text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 10px; border: 1px solid var(--black-650); background: var(--black-800); color: var(--text); cursor: pointer; }
+.dopts button svg { width: 18px; height: 18px; color: var(--muted, #8A8C93); }
+.dopts button small { color: var(--muted, #8A8C93); line-height: 1.4; font-size: 11.5px; }
+.dopts button.on { border-color: var(--cherry-500, #D42A45); background: linear-gradient(160deg, rgba(179,23,47,.25), rgba(179,23,47,.05)); }
+.dopts button.on svg { color: #fff; }
